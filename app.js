@@ -181,7 +181,7 @@
   function chartTheme() {
     return {
       layout: {
-        background: { type: 'solid', color: '#050705' },
+        background: { type: 'solid', color: '#010302' },
         textColor: '#7a8a62',
         fontSize: 11,
         fontFamily: '"IBM Plex Mono", "SF Mono", Menlo, Consolas, monospace',
@@ -203,14 +203,14 @@
   }
 
   function candleOpts() {
-    /* CRT phosphor glow tubes: green up / amber down */
+    /* CRT phosphor glow tubes — near-solid neon (unmistakable bloom) */
     return {
-      upColor: 'rgba(110, 255, 90, 0.42)',
-      downColor: 'rgba(255, 170, 40, 0.42)',
-      borderUpColor: '#9fff5c',
-      borderDownColor: '#ffb83a',
-      wickUpColor: '#c8ff90',
-      wickDownColor: '#ffd078',
+      upColor: '#6fff5a',
+      downColor: '#ffaa28',
+      borderUpColor: '#6fff5a',
+      borderDownColor: '#ffaa28',
+      wickUpColor: '#b8ff90',
+      wickDownColor: '#ffd878',
       borderVisible: true,
     };
   }
