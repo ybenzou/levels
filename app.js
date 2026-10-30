@@ -631,7 +631,7 @@
     const up = k.levels[j], dn = k.levels[j + 1];
     const text = (z.tags || []).map(function (t) { return esc((zt[t] || {}).text || ''); }).join('');
     return '<div class="gz cur" data-zi="k' + j + '">' + head +
-      '<div class="gz-now">▶ 现价 <b>' + w.close.toFixed(2) + '</b> 在 ' + keyName(k, dn) + ' 和 ' + keyName(k, up) + ' 之间</div>' +
+      '<div class="gz-now">▶ ' + (DATA.live ? '收盘' : '现价') + ' <b>' + w.close.toFixed(2) + '</b> 在 ' + keyName(k, dn) + ' 和 ' + keyName(k, up) + ' 之间</div>' +
       '<div class="gz-t">' + text + '</div></div>';
   }
 
@@ -689,7 +689,7 @@
     const nm = function (lv) { return lv ? keyName(k, lv) + ' <b>' + lv.price.toFixed(2) + '</b>' : ''; };
     const items = [];
     if (R1 && S1) {
-      items.push('现价 <b>' + w.close.toFixed(2) + '</b> 夹在 ' + nm(S1) + '（' + pctPts(S1.dist_pct, 1) + '）和 ' + nm(R1) +
+      items.push((DATA.live ? '收盘 ' : '现价 ') + '<b>' + w.close.toFixed(2) + '</b> 夹在 ' + nm(S1) + '（' + pctPts(S1.dist_pct, 1) + '）和 ' + nm(R1) +
         '（' + pctPts(R1.dist_pct, 1) + '）之间。' + (s.room_ratio != null ? (s.room_ratio < 0.8 ? '离压力更近：向上空间只有向下的 ' + s.room_ratio.toFixed(1) + ' 倍。' :
         (s.room_ratio > 1.25 ? '离支撑更近：向上空间是向下的 ' + s.room_ratio.toFixed(1) + ' 倍。' : '上下空间差不多。')) : ''));
     } else if (S1) {
