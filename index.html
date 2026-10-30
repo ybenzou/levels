@@ -37,6 +37,7 @@
       <button type="button" class="tab" data-view="levels">点位</button>
       <button type="button" class="tab" data-view="hold">触及</button>
       <button type="button" class="tab" data-view="break">突破</button>
+      <button type="button" class="tab" data-view="playback">回测</button>
     </nav>
 
     <section class="view on" id="view-observe" aria-label="观察">
@@ -184,6 +185,67 @@
         </aside>
       </div>
     </section>
+
+    <section class="view" id="view-playback" hidden aria-label="回测">
+      <div class="obs">
+        <div class="chart-pane">
+          <div class="tool">
+            <div class="toggles" role="group" aria-label="回测图层">
+              <button type="button" class="tog on" data-play-layer="hold">触及</button>
+              <button type="button" class="tog on" data-play-layer="break">突破</button>
+              <span class="sep"></span>
+              <button type="button" class="tog on" data-play-speed="1">1×</button>
+              <button type="button" class="tog" data-play-speed="2">2×</button>
+              <button type="button" class="tog" data-play-speed="4">4×</button>
+            </div>
+            <button type="button" class="tog ghost" id="btnFitPlay">适配</button>
+          </div>
+          <div class="chart-stack">
+            <div id="chartPlay" role="img" aria-label="回测播放K线"></div>
+          </div>
+          <div class="deck" aria-label="回测走带">
+            <button type="button" class="deck-btn" id="btnPlayStart" title="回到首日">|&lt;</button>
+            <button type="button" class="deck-btn" id="btnPlayPrev" title="上一日">&lt;&lt;</button>
+            <button type="button" class="deck-btn play" id="btnPlayToggle" title="播放/暂停" aria-pressed="false">&#9654;</button>
+            <button type="button" class="deck-btn" id="btnPlayNext" title="下一日">&gt;&gt;</button>
+            <button type="button" class="deck-btn" id="btnPlayEnd" title="跳到末日">&gt;|</button>
+            <div class="deck-scrub">
+              <input type="range" id="playScrub" min="0" max="0" value="0" step="1" aria-label="拖动日期" />
+              <div class="deck-track-marks" aria-hidden="true"></div>
+            </div>
+            <div class="deck-meta">
+              <div class="deck-date" id="playDate">—</div>
+              <div class="deck-prog" id="playProg">0 / 0</div>
+            </div>
+          </div>
+          <div class="chart-foot">
+            <div class="ohlc" id="crossPlay">走带 · OHLC</div>
+            <div class="legend tight" id="playLegend">
+              <span class="lg"><span class="sw sup"></span>触及✓</span>
+              <span class="lg"><span class="sw res"></span>触及✗</span>
+              <span class="lg"><span class="sw anc"></span>↑突破</span>
+              <span class="lg"><span class="sw res"></span>↓跌破</span>
+            </div>
+          </div>
+        </div>
+        <aside class="rail" aria-label="滚动回测">
+          <div class="rail-h">滚动回测 <span id="playWin" class="rail-sub"></span></div>
+          <div class="rail-sec">
+            <div class="sec-l">累计触及</div>
+            <div id="playHoldKpi" class="kpi-strip"></div>
+          </div>
+          <div class="rail-sec">
+            <div class="sec-l">累计突破 +5d</div>
+            <div id="playBreakKpi" class="kpi-grid"></div>
+          </div>
+          <div class="rail-sec grow">
+            <div class="sec-l">当日事件</div>
+            <div id="playDayFeed" class="day-feed"></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
   </div>
   <script src="./app.js"></script>
 </body>

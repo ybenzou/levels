@@ -31,6 +31,18 @@
     levels: { chart: null, series: null, lines: [], inited: false },
     hold: { chart: null, series: null, lines: [], inited: false },
     break: { chart: null, series: null, lines: [], inited: false },
+    playback: { chart: null, series: null, lines: [], inited: false },
+  };
+
+  const playState = {
+    idx: 0,
+    playing: false,
+    timer: null,
+    speed: 1,
+    layers: { hold: true, break: true },
+    fullCandles: null,
+    holdEvents: null,
+    breakEvents: null,
   };
 
   function $(sel) { return document.querySelector(sel); }
@@ -450,7 +462,7 @@
   function ensureChartSized(key) {
     const pack = key ? tapes[key] : null;
     const ch = pack ? pack.chart : chart;
-    const el = $(key === 'levels' ? '#chartLevels' : key === 'hold' ? '#chartHold' : key === 'break' ? '#chartBreak' : '#chart');
+    const el = $(key === 'levels' ? '#chartLevels' : key === 'hold' ? '#chartHold' : key === 'break' ? '#chartBreak' : key === 'playback' ? '#chartPlay' : '#chart');
     if (!ch || !el) return;
     const stack = el.parentElement;
     const w = stack ? stack.clientWidth : el.clientWidth;
@@ -841,6 +853,389 @@
     if (fit) fit.onclick = function () { ch.timeScale().fitContent(); };
   }
 
+
+  /* —— 回测播放 —— */
+  function playMs() {
+    return ({ 1: 160, 2: 80, 4: 40 })[playState.speed] || 160;
+  }
+
+  function stopPlayback() {
+    playState.playing = false;
+    if (playState.timer) {
+      clearInterval(playState.timer);
+      playState.timer = null;
+    }
+    const btn = $('#btnPlayToggle');
+    if (btn) {
+      btn.classList.remove('on');
+      btn.setAttribute('aria-pressed', 'false');
+      btn.innerHTML = '&#9654;';
+    }
+  }
+
+  function startPlayback() {
+    if (!playState.fullCandles || !playState.fullCandles.length) return;
+    if (playState.idx >= playState.fullCandles.length - 1) {
+      playState.idx = 0;
+    }
+    playState.playing = true;
+    const btn = $('#btnPlayToggle');
+    if (btn) {
+      btn.classList.add('on');
+      btn.setAttribute('aria-pressed', 'true');
+      btn.innerHTML = '&#9646;&#9646;';
+    }
+    if (playState.timer) clearInterval(playState.timer);
+    playState.timer = setInterval(function () {
+      if (playState.idx >= playState.fullCandles.length - 1) {
+        stopPlayback();
+        return;
+      }
+      setPlayIndex(playState.idx + 1, false);
+    }, playMs());
+  }
+
+  function togglePlayback() {
+    if (playState.playing) stopPlayback();
+    else startPlayback();
+  }
+
+  function median(arr) {
+    if (!arr || !arr.length) return null;
+    const a = arr.slice().sort(function (x, y) { return x - y; });
+    const m = Math.floor(a.length / 2);
+    return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+  }
+
+  function rollingHoldStats(uptoDate) {
+    const evs = (playState.holdEvents || []).filter(function (e) { return e.date <= uptoDate; });
+    let sn = 0, sh = 0, rn = 0, rh = 0;
+    evs.forEach(function (e) {
+      if (e.side === 'support') { sn++; if (e.held) sh++; }
+      else if (e.side === 'resistance') { rn++; if (e.held) rh++; }
+    });
+    return {
+      n: evs.length,
+      support: { n: sn, held: sh, hit_rate: sn ? sh / sn : null },
+      resistance: { n: rn, held: rh, hit_rate: rn ? rh / rn : null },
+      events: evs,
+    };
+  }
+
+  function rollingBreakStats(uptoDate) {
+    const evs = (playState.breakEvents || []).filter(function (e) { return e.date <= uptoDate; });
+    const buckets = {
+      up1: [], up5: [], dn1: [], dn5: [],
+      upN: 0, dnN: 0, upWin5: 0, dnWin5: 0,
+    };
+    evs.forEach(function (e) {
+      const r = e.rets || {};
+      if (e.dir === 'up') {
+        buckets.upN++;
+        if (r['1'] != null) buckets.up1.push(Number(r['1']));
+        if (r['5'] != null) {
+          buckets.up5.push(Number(r['5']));
+          if (Number(r['5']) > 0) buckets.upWin5++;
+        }
+      } else if (e.dir === 'down') {
+        buckets.dnN++;
+        if (r['1'] != null) buckets.dn1.push(Number(r['1']));
+        if (r['5'] != null) {
+          buckets.dn5.push(Number(r['5']));
+          if (Number(r['5']) < 0) buckets.dnWin5++;
+        }
+      }
+    });
+    return {
+      n: evs.length,
+      up: {
+        n: buckets.upN,
+        med1: median(buckets.up1),
+        med5: median(buckets.up5),
+        win5: buckets.up5.length ? buckets.upWin5 / buckets.up5.length : null,
+      },
+      down: {
+        n: buckets.dnN,
+        med1: median(buckets.dn1),
+        med5: median(buckets.dn5),
+        win5: buckets.dn5.length ? buckets.dnWin5 / buckets.dn5.length : null,
+      },
+      events: evs,
+    };
+  }
+
+  function playMarkersAt(uptoDate) {
+    const markers = [];
+    const byTime = {};
+
+    if (playState.layers.hold) {
+      const holdByDate = {};
+      (playState.holdEvents || []).forEach(function (e) {
+        if (e.date > uptoDate) return;
+        const cur = holdByDate[e.date];
+        if (!cur || (cur.held && !e.held)) holdByDate[e.date] = e;
+      });
+      Object.keys(holdByDate).forEach(function (dt) {
+        const e = holdByDate[dt];
+        const held = !!e.held;
+        const isSup = e.side === 'support';
+        byTime[toUnix(dt) + '|h'] = {
+          time: toUnix(dt),
+          position: isSup ? 'belowBar' : 'aboveBar',
+          color: held ? '#8fbc5a' : '#d4783a',
+          shape: held ? 'circle' : 'square',
+          text: (isSup ? '撑' : '压') + (held ? '✓' : '✗'),
+        };
+      });
+    }
+
+    if (playState.layers.break) {
+      const seen = {};
+      (playState.breakEvents || []).forEach(function (e) {
+        if (e.date > uptoDate) return;
+        const key = e.date + '|' + e.dir;
+        if (seen[key]) return;
+        seen[key] = true;
+        const up = e.dir === 'up';
+        // Prefer break markers over hold on same bar when both fire
+        byTime[toUnix(e.date) + '|b'] = {
+          time: toUnix(e.date),
+          position: up ? 'aboveBar' : 'belowBar',
+          color: up ? '#e8a838' : '#d4783a',
+          shape: up ? 'arrowUp' : 'arrowDown',
+          text: up ? '↑' : '↓',
+        };
+      });
+    }
+
+    // LWCharts: one marker per time — prefer break over hold
+    const final = {};
+    Object.keys(byTime).forEach(function (k) {
+      const m = byTime[k];
+      const prev = final[m.time];
+      if (!prev) {
+        final[m.time] = m;
+        return;
+      }
+      // arrows beat circles/squares
+      if ((m.shape === 'arrowUp' || m.shape === 'arrowDown') &&
+          prev.shape !== 'arrowUp' && prev.shape !== 'arrowDown') {
+        final[m.time] = m;
+      }
+    });
+    return Object.keys(final).map(Number).sort(function (a, b) { return a - b; })
+      .map(function (t) { return final[t]; });
+  }
+
+  function renderPlayRail(dateStr) {
+    const hold = rollingHoldStats(dateStr);
+    const br = rollingBreakStats(dateStr);
+    const win = $('#playWin');
+    if (win) {
+      const first = playState.fullCandles[0] ? new Date(playState.fullCandles[0].time * 1000).toISOString().slice(0, 10) : '';
+      win.textContent = first + ' → ' + dateStr;
+    }
+    $('#playHoldKpi').innerHTML = [
+      cell('支撑', pct(hold.support.hit_rate), 'n=' + hold.support.n, barHtml(hold.support.hit_rate, '')),
+      cell('压力', pct(hold.resistance.hit_rate), 'n=' + hold.resistance.n, barHtml(hold.resistance.hit_rate, 'res')),
+      cell('事件', String(hold.n), '累计'),
+    ].join('');
+    $('#playBreakKpi').innerHTML = [
+      cell('↑+5d', '<span class="' + clsRet(br.up.med5) + '">' + pctPts(br.up.med5) + '</span>',
+        '胜 ' + pct(br.up.win5) + ' n=' + br.up.n, barHtml(br.up.win5, '')),
+      cell('↓+5d', '<span class="' + clsRet(br.down.med5) + '">' + pctPts(br.down.med5) + '</span>',
+        '胜 ' + pct(br.down.win5) + ' n=' + br.down.n, barHtml(br.down.win5, 'res')),
+      cell('↑+1d', '<span class="' + clsRet(br.up.med1) + '">' + pctPts(br.up.med1) + '</span>', '中位'),
+      cell('↓+1d', '<span class="' + clsRet(br.down.med1) + '">' + pctPts(br.down.med1) + '</span>', '中位'),
+    ].join('');
+
+    const dayHold = (playState.holdEvents || []).filter(function (e) { return e.date === dateStr; });
+    const dayBrk = (playState.breakEvents || []).filter(function (e) { return e.date === dateStr; });
+    const feed = $('#playDayFeed');
+    if (!feed) return;
+    if (!dayHold.length && !dayBrk.length) {
+      feed.innerHTML = '<div class="empty">当日无触及 / 突破事件</div>';
+      return;
+    }
+    const rows = [];
+    dayHold.forEach(function (e) {
+      rows.push('<div class="ev"><span class="mk ' + (e.held ? 'held' : 'broke') + '">' +
+        (e.side === 'support' ? '撑' : '压') + (e.held ? '✓' : '✗') + '</span>' +
+        '<span class="nm">' + esc(e.family) + '</span>' +
+        '<span class="px">' + Number(e.level).toFixed(1) + '</span></div>');
+    });
+    dayBrk.forEach(function (e) {
+      const up = e.dir === 'up';
+      const r5 = e.rets && e.rets['5'];
+      rows.push('<div class="ev"><span class="mk ' + (up ? 'up' : 'dn') + '">' +
+        (up ? '↑' : '↓') + '</span>' +
+        '<span class="nm">' + esc(e.family) +
+        (r5 != null ? ' · ' + pctPts(r5) : '') + '</span>' +
+        '<span class="px">' + Number(e.level).toFixed(1) + '</span></div>');
+    });
+    feed.innerHTML = rows.join('');
+  }
+
+  function setPlayIndex(idx, fromUser) {
+    const t = tapes.playback;
+    if (!playState.fullCandles || !playState.fullCandles.length || !t.series) return;
+    const max = playState.fullCandles.length - 1;
+    idx = Math.max(0, Math.min(max, idx));
+    playState.idx = idx;
+    const slice = playState.fullCandles.slice(0, idx + 1);
+    t.series.setData(slice);
+    const dateStr = new Date(playState.fullCandles[idx].time * 1000).toISOString().slice(0, 10);
+    t.series.setMarkers(playMarkersAt(dateStr));
+
+    // level lines from events seen so far (recent unique)
+    clearLines(t.series, t.lines);
+    const seen = {};
+    const allEv = []
+      .concat((playState.holdEvents || []).filter(function (e) { return e.date <= dateStr; }))
+      .concat((playState.breakEvents || []).filter(function (e) { return e.date <= dateStr; }));
+    allEv.slice().reverse().forEach(function (e) {
+      const key = (e.family || '') + '|' + e.level;
+      if (seen[key]) return;
+      if (Object.keys(seen).length >= 10) return;
+      seen[key] = true;
+      const isSup = e.side === 'support' || e.dir === 'down';
+      const isUp = e.dir === 'up';
+      t.lines.push(t.series.createPriceLine({
+        price: e.level,
+        color: isUp ? 'rgba(232,168,56,0.5)' :
+          (isSup ? 'rgba(143,188,90,0.5)' : 'rgba(212,120,58,0.5)'),
+        lineWidth: 1,
+        lineStyle: LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: false,
+        title: e.family || '',
+      }));
+    });
+
+    const scrub = $('#playScrub');
+    if (scrub && Number(scrub.value) !== idx) scrub.value = String(idx);
+    if (scrub) {
+      const pctFill = max > 0 ? (idx / max) * 100 : 0;
+      scrub.style.setProperty('--scrub-pct', pctFill.toFixed(2) + '%');
+    }
+    const dateEl = $('#playDate');
+    if (dateEl) dateEl.textContent = dateStr;
+    const prog = $('#playProg');
+    if (prog) prog.textContent = (idx + 1) + ' / ' + (max + 1);
+
+    const bar = slice[slice.length - 1];
+    const cross = $('#crossPlay');
+    if (cross && bar) {
+      cross.innerHTML = '<strong>' + dateStr + '</strong>  O ' + bar.open.toFixed(2) +
+        '  H ' + bar.high.toFixed(2) + '  L ' + bar.low.toFixed(2) +
+        '  C <strong>' + bar.close.toFixed(2) + '</strong>';
+    }
+
+    renderPlayRail(dateStr);
+
+    if (fromUser && t.chart) {
+      t.chart.timeScale().fitContent();
+    }
+  }
+
+  function syncPlayLayerButtons() {
+    document.querySelectorAll('[data-play-layer]').forEach(function (btn) {
+      const k = btn.getAttribute('data-play-layer');
+      btn.classList.toggle('on', !!playState.layers[k]);
+    });
+    document.querySelectorAll('[data-play-speed]').forEach(function (btn) {
+      btn.classList.toggle('on', Number(btn.getAttribute('data-play-speed')) === playState.speed);
+    });
+  }
+
+  function bindPlaybackControls() {
+    const toggle = $('#btnPlayToggle');
+    if (toggle) toggle.onclick = function () { togglePlayback(); };
+    const prev = $('#btnPlayPrev');
+    if (prev) prev.onclick = function () {
+      stopPlayback();
+      setPlayIndex(playState.idx - 1, true);
+    };
+    const next = $('#btnPlayNext');
+    if (next) next.onclick = function () {
+      stopPlayback();
+      setPlayIndex(playState.idx + 1, true);
+    };
+    const start = $('#btnPlayStart');
+    if (start) start.onclick = function () {
+      stopPlayback();
+      setPlayIndex(0, true);
+    };
+    const end = $('#btnPlayEnd');
+    if (end) end.onclick = function () {
+      stopPlayback();
+      setPlayIndex(playState.fullCandles.length - 1, true);
+    };
+    const scrub = $('#playScrub');
+    if (scrub) {
+      scrub.addEventListener('input', function () {
+        stopPlayback();
+        setPlayIndex(Number(scrub.value), true);
+      });
+    }
+    document.querySelectorAll('[data-play-layer]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const k = btn.getAttribute('data-play-layer');
+        playState.layers[k] = !playState.layers[k];
+        syncPlayLayerButtons();
+        setPlayIndex(playState.idx, false);
+      });
+    });
+    document.querySelectorAll('[data-play-speed]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        playState.speed = Number(btn.getAttribute('data-play-speed')) || 1;
+        syncPlayLayerButtons();
+        if (playState.playing) {
+          stopPlayback();
+          startPlayback();
+        }
+      });
+    });
+  }
+
+  function initPlaybackChart() {
+    const el = $('#chartPlay');
+    if (!el || typeof LightweightCharts === 'undefined') return;
+    if (!playState.fullCandles) {
+      playState.fullCandles = candleData();
+      const bt = DATA.backtest || {};
+      playState.holdEvents = ((bt.hold || {}).events || []).slice()
+        .sort(function (a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
+      let bev = (bt.breakout || {}).events || [];
+      if (!bev.length) {
+        bev = [].concat((bt.breakout || {}).examples_up || [], (bt.breakout || {}).examples_down || []);
+      }
+      playState.breakEvents = bev.slice()
+        .sort(function (a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
+      const scrub = $('#playScrub');
+      if (scrub) {
+        scrub.max = String(Math.max(0, playState.fullCandles.length - 1));
+        scrub.value = '0';
+      }
+    }
+    if (tapes.playback.inited) {
+      ensureChartSized('playback');
+      setPlayIndex(playState.idx, true);
+      return;
+    }
+    el.innerHTML = '';
+    const ch = LightweightCharts.createChart(el, chartTheme());
+    const series = ch.addCandlestickSeries(candleOpts());
+    tapes.playback = { chart: ch, series: series, lines: [], inited: true };
+    bindCrosshair(ch, series, '#crossPlay');
+    bindResize(ch, el);
+    const fit = $('#btnFitPlay');
+    if (fit) fit.onclick = function () { ch.timeScale().fitContent(); };
+    // start near beginning so playback story is clear (first ~20 days visible path)
+    const startIdx = Math.min(19, Math.max(0, playState.fullCandles.length - 1));
+    setPlayIndex(startIdx, true);
+  }
+
+
   /* —— filters / views —— */
   function syncPresetButtons() {
     document.querySelectorAll('[data-preset]').forEach(function (btn) {
@@ -956,8 +1351,9 @@
     });
     const stamp = document.querySelector('.stamp');
     if (stamp) {
-      stamp.textContent = ({ observe: '观察', levels: '点位', hold: '触及', break: '突破' })[id] || id;
+      stamp.textContent = ({ observe: '观察', levels: '点位', hold: '触及', break: '突破', playback: '回测' })[id] || id;
     }
+    if (id !== 'playback') stopPlayback();
     if (id === 'observe') {
       requestAnimationFrame(function () { ensureChartSized(); });
     } else if (id === 'levels') {
@@ -969,6 +1365,9 @@
     } else if (id === 'break') {
       initBreakChart();
       requestAnimationFrame(function () { ensureChartSized('break'); });
+    } else if (id === 'playback') {
+      initPlaybackChart();
+      requestAnimationFrame(function () { ensureChartSized('playback'); });
     }
   }
 
@@ -995,7 +1394,9 @@
     renderHoldRail();
     renderBreakRail();
     syncPresetButtons();
+    syncPlayLayerButtons();
     bindFilters();
+    bindPlaybackControls();
     bindViews();
     switchView('observe');
   }
