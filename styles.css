@@ -1696,3 +1696,5 @@ body::after {
 .jd.live { border-color: var(--cream); }
 .jd.live .jd-h { color: var(--cream); letter-spacing: 0.06em; }
 .jd-n { margin-top: 6px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.rt-chip.on { color: var(--crt); border-color: rgba(159,212,95,0.6); }
+.rt-al { margin-top: 6px; padding-top: 5px; border-top: 1px dashed var(--hair); font-size: 12px; line-height: 1.6; color: var(--ink); }

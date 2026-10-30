@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#0c0e09" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>Levels · AVGO</title>
-  <link rel="stylesheet" href="./styles.css?v=20261030211000" />
+  <link rel="stylesheet" href="./styles.css?v=20261030220000" />
   <script src="https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -114,6 +114,8 @@
             <div class="toggles" role="group" aria-label="叠加">
               <span class="obs-key" id="obsKey"></span>
               <span class="sep"></span>
+              <button type="button" class="tog rt-chip" id="rtChip" title="Finnhub 逐笔成交">实时</button>
+              <button type="button" class="tog" id="btnAlert" title="关键位被碰到 / 越线 / 守住 / 延续时弹出浏览器通知">提醒</button>
               <button type="button" class="tog" id="btnHist" title="窗口里每天模型画的 R1 / S1，以及这些线后来是守住还是被突破">回放</button>
               <button type="button" class="tog" id="btnRef" title="均线、布林、高低点等常用标志线">参考线</button>
               <button type="button" class="tog on" data-vrvp="1" id="btnVrvp" title="窗口内的成交量剖面与价值区">VRVP</button>
@@ -301,6 +303,6 @@
     </section>
 
   </div>
-  <script src="./app.js?v=20261030211000"></script>
+  <script src="./app.js?v=20261030220000"></script>
 </body>
 </html>

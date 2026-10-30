@@ -308,11 +308,7 @@
     const sym = DATA.symbol || 'AVGO';
     $('#title').textContent = sym;
     document.title = 'Levels · ' + sym;
-    const close = Number(DATA.last_close).toFixed(2);
-    const q = DATA.live;
-    $('#asof').innerHTML = '截至 <strong>' + esc(DATA.as_of) + '</strong> · 末收 <strong>' +
-      close + '</strong>' + (q ? ' · ' + liveLabel(q) + ' <strong>' + q.price.toFixed(2) + '</strong> <span class="' +
-      (q.chg_pct < 0 ? 'kind-sup' : 'kind-res') + '">' + pctPts(q.chg_pct, 1) + '</span> <span class="muted">' + bjTime(q.time) + '</span>' : '');
+    renderAsof();
     document.querySelectorAll('#tickerSwitch .tick').forEach(function (btn) {
       const s = btn.getAttribute('data-symbol');
       const on = s === sym;
@@ -495,12 +491,7 @@
         add({ id: 'r' + i, price: ln.price, kind: ln.kind, group: ln.group, key: false }, (GROUP_STYLE[ln.group] || GROUP_STYLE.range).style);
       });
     }
-    if (DATA.live) {
-      liveLine = candleSeries.createPriceLine({
-        price: DATA.live.price, color: 'rgba(243,235,212,0.85)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed,
-        axisLabelVisible: true, title: liveLabel(DATA.live),
-      });
-    }
+    updateLiveLine();
     if (w.key) {
       w.key.levels.forEach(function (lv, i) {
         add({ id: 'k' + i, price: lv.price, kind: lv.kind, strength: lv.salience, key: true }, LightweightCharts.LineStyle.Solid);
@@ -635,51 +626,256 @@
       '<div class="gz-t">' + text + '</div></div>';
   }
 
-  function liveLabel(q) { return { pre: '盘前', regular: '盘中' }[q.session] || '最新'; }
-  function bjTime(iso) {
+  function liveLabel(q) { return { pre: '盘前', regular: '盘中', post: '盘后' }[q.session] || '最新'; }
+  function bjTime(iso, sec) {
     try {
-      return new Date(iso).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) + ' 北京时间';
+      const o = { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false };
+      if (sec) o.second = '2-digit';
+      return new Date(iso).toLocaleString('zh-CN', o) + ' 北京时间';
     } catch (e) { return iso; }
   }
 
-  function liveHtml(k) {
-    const q = DATA.live, L = k.live;
-    if (!q || !L) return '';
-    const byP = function (p) { return k.levels.filter(function (x) { return x.price === p; })[0]; };
+  /* —— 实时：Finnhub 逐笔成交，对照按收盘画好的关键位 —— */
+  const FH_KEY_DEFAULT = 'dbi6u79r01qtsu19mke0dbi6u79r01qtsu19mkeg';
+  const rt = { ws: null, state: 'off', day: null, track: {}, alerts: [], timer: 0, retry: 0, ticks: 0, lastTick: 0 };
+
+  function fhKey() {
+    try { return localStorage.getItem('levels.fhkey') || FH_KEY_DEFAULT; } catch (e) { return FH_KEY_DEFAULT; }
+  }
+  function etParts(ms) {
+    const o = {};
+    new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date(ms)).forEach(function (x) { o[x.type] = x.value; });
+    return { date: o.year + '-' + o.month + '-' + o.day, min: (Number(o.hour) % 24) * 60 + Number(o.minute) };
+  }
+  function sessionOf(min) { return min < 570 ? 'pre' : (min < 960 ? 'regular' : 'post'); }
+  function lvAtr(lv) { return (lv.hi - lv.lo) / 0.6; }
+  function allKeyLevels() {
+    const o = obsData(), out = {};
+    if (!o) return [];
+    Object.keys(o.by_window).forEach(function (wk) {
+      const k = o.by_window[wk].key;
+      if (k) k.levels.forEach(function (lv) { out[lv.kind + lv.price] = lv; });
+    });
+    return Object.keys(out).map(function (id) { return out[id]; });
+  }
+  function trackOf(lv) {
+    const id = lv.kind + lv.price;
+    return rt.track[id] || (rt.track[id] = { touched: false, held: false, beyond: false, follow: false, back: false });
+  }
+
+  function rtAlert(lv, what) {
+    const k = obsKey();
+    const name = k && k.levels.indexOf(lv) >= 0 ? keyName(k, lv) : (lv.kind === 'support' ? '支撑' : '压力');
+    const msg = (DATA.symbol || '') + ' ' + what + ' ' + name + ' ' + lv.price.toFixed(2);
+    rt.alerts.unshift({ t: DATA.live ? Date.parse(DATA.live.time) : Date.now(), msg: msg });
+    rt.alerts = rt.alerts.slice(0, 8);
+    try {
+      if (window.Notification && Notification.permission === 'granted') new Notification('Levels · ' + (DATA.symbol || ''), { body: msg });
+    } catch (e) { /* */ }
+  }
+
+  function feedLevel(lv, p, seed) {
+    const s = trackOf(lv), sup = lv.kind === 'support', tch = ((obsData() || {}).key_model || {}).touch_atr || 0.1;
+    const lo = seed ? seed.low : p, hi = seed ? seed.high : p;
+    const say = seed ? function () { /* */ } : function (w) { rtAlert(lv, w); };
+    if (!s.touched && (sup ? lo <= lv.price + tch * lvAtr(lv) : hi >= lv.price - tch * lvAtr(lv))) { s.touched = true; say('碰到'); }
+    if (seed) return;
+    if (s.touched && !s.held && !s.beyond && (sup ? p >= lv.target : p <= lv.target)) { s.held = true; say('守住（盘中）'); }
+    if (!s.held && !s.beyond && (sup ? p < lv.fail : p > lv.fail)) { s.beyond = true; say(sup ? '盘中跌破' : '盘中突破'); }
+    if (s.beyond && !s.follow && (sup ? p <= lv.follow_to : p >= lv.follow_to)) { s.follow = true; say(sup ? '跌破后延续' : '突破后延续'); }
+    if (s.beyond && !s.follow && !s.back && (sup ? p > lv.price : p < lv.price)) { s.back = true; say('收回（假突破迹象）'); }
+  }
+
+  function levelStatus(lv, p) {
+    const s = trackOf(lv), sup = lv.kind === 'support';
+    const out = sup ? p < lv.fail : p > lv.fail;
+    if (s.follow) return out ? 'follow' : 'back';
+    if (out) return 'beyond';
+    if (s.held) return 'held';
+    if (sup ? p < lv.price : p > lv.price) return 'through';
+    if (s.touched) return 'touched';
+    return 'ahead';
+  }
+
+  function reachAt(lv, p, w, km) {
+    const m = km.reach_model, r = w.key && w.key.rt;
+    if (!m || !r) return null;
+    const a = r.a;
+    const d = Math.min(Math.abs(lv.price - p) / a, km.max_dist || 8);
+    const sup = lv.price < p ? 1 : 0;
+    const up = p > (r.sum49 + p) / 50;
+    const wt = (sup && up) || (!sup && !up) ? 1 : 0;
+    const slope = r.s20_m5 ? Math.max(-3, Math.min(3, ((r.sum19 + p) / 20 - r.s20_m5) / a)) : 0;
+    const day = rt.day || DATA.live || {};
+    const hi = Math.max(r.wh0, day.high || p), lo = Math.min(r.wl0, day.low || p);
+    const pos = hi > lo ? (p - lo) / (hi - lo) : 0.5;
+    const x = [d, d * d, sup, wt, slope, pos, sup * slope];
+    let z = m.w[0];
+    for (let i = 0; i < x.length; i++) z += m.w[i + 1] * (x[i] - m.mu[i]) / m.sd[i];
+    return 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, z))));
+  }
+
+  function liveHtml(k, w, km) {
+    const q = DATA.live;
+    if (!q || !k) return '';
     const nm = function (lv) { return keyName(k, lv) + ' <b>' + lv.price.toFixed(2) + '</b>'; };
     const px = q.price;
+    const ses = liveLabel(q);
     const items = [];
-    L.levels.forEach(function (x) {
-      if (x.status === 'ahead') return;
-      const lv = byP(x.price);
-      if (!lv) return;
+    k.levels.forEach(function (lv) {
+      const st = levelStatus(lv, px);
+      if (st === 'ahead') return;
       const sup = lv.kind === 'support';
       const brk = sup ? '跌破' : '突破';
-      const gap = (lv.fail / px - 1) * 100;
-      if (x.status === 'beyond') {
-        items.push(nm(lv) + ' 已越过' + brk + '线 <b>' + lv.fail.toFixed(2) + '</b>：收盘仍在' + (sup ? '下方' : '上方') + '就算' + brk +
+      const gap = Math.abs((lv.fail / px - 1) * 100).toFixed(1);
+      if (st === 'follow') {
+        items.push(nm(lv) + ' ' + brk + '后已走到 <b>' + lv.follow_to.toFixed(2) + '</b>（' + ses + '）：收盘仍在' + brk + '线 <b>' +
+          lv.fail.toFixed(2) + '</b> ' + (sup ? '下方' : '上方') + '，就是一次「' + brk + '＋延续」。');
+      } else if (st === 'back') {
+        items.push(nm(lv) + ' ' + brk + '后曾走到 <b>' + lv.follow_to.toFixed(2) + '</b>，现已收回' + brk + '线 <b>' + lv.fail.toFixed(2) + '</b> ' +
+          (sup ? '上方' : '下方') + '（' + ses + '）：收盘在' + (sup ? '上方' : '下方') + '就不算' + brk + '。');
+      } else if (st === 'beyond') {
+        items.push(nm(lv) + ' 已越过' + brk + '线 <b>' + lv.fail.toFixed(2) + '</b>（' + ses + '）：收盘仍在' + (sup ? '下方' : '上方') + '就算' + brk +
           '。历史上' + brk + '后 ' + pct(lv.follow) + ' 会继续走到 <b>' + lv.follow_to.toFixed(2) + '</b>，其余先收回线' +
           (sup ? '上方' : '下方') + '（假' + brk + '）。');
+      } else if (st === 'held') {
+        items.push(nm(lv) + ' 碰到后已' + (sup ? '反弹' : '回落') + '到 <b>' + lv.target.toFixed(2) + '</b>（' + ses + '）：按回测定义算守住。');
       } else {
-        items.push((x.status === 'through' ? '已' + (sup ? '跌到 ' : '涨过 ') + nm(lv) + (sup ? ' 下方' : ' 上方') : '已碰到 ' + nm(lv)) +
-          '，离' + brk + '线 <b>' + lv.fail.toFixed(2) + '</b> 还差 ' + Math.abs(gap).toFixed(1) + '%。收盘' + (sup ? '低于' : '高于') +
+        items.push((st === 'through' ? '已' + (sup ? '跌到 ' : '涨过 ') + nm(lv) + (sup ? ' 下方' : ' 上方') : '已碰到 ' + nm(lv)) +
+          '，离' + brk + '线 <b>' + lv.fail.toFixed(2) + '</b> 还差 ' + gap + '%。收盘' + (sup ? '低于' : '高于') +
           '它才算' + brk + '；先' + (sup ? '反弹' : '回落') + '到 <b>' + lv.target.toFixed(2) + '</b> 算守住。历史上碰到后守住 ' +
           pct(lv.hold) + '、' + brk + ' ' + pct(lv.brk) + '，' + brk + '后 ' + pct(lv.follow) + ' 会继续走到 <b>' + lv.follow_to.toFixed(2) + '</b>。');
       }
     });
-    const ahead = L.levels.filter(function (x) { return x.status === 'ahead'; });
-    const dn = ahead.filter(function (x) { return x.price < px; }).sort(function (a, b) { return b.price - a.price; })[0];
-    const up = ahead.filter(function (x) { return x.price > px; }).sort(function (a, b) { return a.price - b.price; })[0];
+    const ahead = k.levels.filter(function (lv) { return levelStatus(lv, px) === 'ahead'; });
+    const dn = ahead.filter(function (lv) { return lv.price < px; }).sort(function (a, b) { return b.price - a.price; })[0];
+    const up = ahead.filter(function (lv) { return lv.price > px; }).sort(function (a, b) { return a.price - b.price; })[0];
     const parts = [];
-    if (dn && byP(dn.price)) parts.push('下方 ' + nm(byP(dn.price)) + '（' + pctPts(dn.dist_pct, 1) + '）10 日内碰到 ' + pct(dn.reach));
-    if (up && byP(up.price)) parts.push('上方 ' + nm(byP(up.price)) + '（' + pctPts(up.dist_pct, 1) + '）' + pct(up.reach));
-    if (parts.length) items.push('按' + liveLabel(q) + '价重算：' + parts.join('；') + '。');
-    if (!items.length) items.push('还在收盘时的 ' + (L.down && byP(L.down) ? nm(byP(L.down)) : '支撑') + ' 和 ' +
-      (L.up && byP(L.up) ? nm(byP(L.up)) : '压力') + ' 之间，计划不变。');
-    return '<div class="jd live"><div class="jd-h">' + liveLabel(q) + ' <b>' + px.toFixed(2) + '</b> <span class="' +
-      (q.chg_pct < 0 ? 'kind-sup' : 'kind-res') + '">' + pctPts(q.chg_pct, 1) + '</span> · ' + bjTime(q.time) + '</div><ul>' +
+    [['下方', dn], ['上方', up]].forEach(function (x) {
+      if (!x[1]) return;
+      const r = reachAt(x[1], px, w, km);
+      parts.push(x[0] + ' ' + nm(x[1]) + '（' + pctPts((x[1].price / px - 1) * 100, 1) + '）' + (r != null ? '10 日内碰到 ' + pct(r) : ''));
+    });
+    if (parts.length) items.push('按' + ses + '价重算：' + parts.join('；') + '。');
+    const src = q.src === 'tick' ? '逐笔实时 · Finnhub' : '定时更新';
+    return '<div class="jd live"><div class="jd-h">' + ses + ' <b>' + px.toFixed(2) + '</b> <span class="' +
+      (q.chg_pct < 0 ? 'kind-sup' : 'kind-res') + '">' + pctPts(q.chg_pct, 1) + '</span> · ' + bjTime(q.time, q.src === 'tick') +
+      ' <span class="muted">' + src + '</span></div><ul>' +
       items.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul>' +
-      '<div class="jd-n">线还是按 ' + esc(DATA.as_of) + ' 收盘画的。回测里的碰到 / 守住 / 突破只看正式交易时段的高低点和收盘，盘前价只用来提前对照；收盘后页面按收盘价重画。</div></div>';
+      (rt.alerts.length ? '<div class="rt-al">' + rt.alerts.map(function (a) {
+        return '<div><span class="muted">' + bjTime(new Date(a.t).toISOString(), true).replace(' 北京时间', '') + '</span> ' + esc(a.msg) + '</div>';
+      }).join('') + '</div>' : '') +
+      '<div class="jd-n">线还是按 ' + esc(DATA.as_of) + ' 收盘画的。盘中越线只是预警，回测里的突破以收盘为准；收盘后页面按收盘价重画。</div></div>';
+  }
+
+  function renderAsof() {
+    const q = DATA.live;
+    $('#asof').innerHTML = '截至 <strong>' + esc(DATA.as_of) + '</strong> · 末收 <strong>' + Number(DATA.last_close).toFixed(2) + '</strong>' +
+      (q ? ' · ' + liveLabel(q) + ' <strong>' + q.price.toFixed(2) + '</strong> <span class="' + (q.chg_pct < 0 ? 'kind-sup' : 'kind-res') + '">' +
+        pctPts(q.chg_pct, 1) + '</span> <span class="muted">' + bjTime(q.time, q.src === 'tick') + '</span>' : '');
+  }
+
+  function updateLiveLine() {
+    if (!candleSeries) return;
+    const q = DATA.live;
+    if (!q) return;
+    if (liveLine) liveLine.applyOptions({ price: q.price, title: liveLabel(q) });
+    else liveLine = candleSeries.createPriceLine({
+      price: q.price, color: 'rgba(243,235,212,0.85)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed,
+      axisLabelVisible: true, title: liveLabel(q),
+    });
+    if (rt.day && rt.day.date > DATA.as_of && q.src === 'tick') {
+      candleSeries.update({ time: toUnix(rt.day.date), open: rt.day.open, high: rt.day.high, low: rt.day.low, close: q.price });
+    }
+  }
+
+  function renderLive() {
+    rt.timer = 0;
+    renderAsof();
+    const box = $('#liveBox'), w = obsWin(), o = obsData();
+    if (box && w) box.innerHTML = liveHtml(w.key, w, (o && o.key_model) || {});
+    updateLiveLine();
+    rtChip();
+  }
+  function scheduleLive() { if (!rt.timer) rt.timer = setTimeout(renderLive, 400); }
+
+  function rtChip() {
+    const el = $('#rtChip');
+    if (!el) return;
+    const idle = rt.state === 'open' && (!rt.lastTick || Date.now() - rt.lastTick > 90000);
+    el.classList.toggle('on', rt.state === 'open' && !idle);
+    el.textContent = rt.state === 'open' ? (idle ? '实时 · 等成交' : '实时 ●') : (rt.state === 'connecting' ? '实时 · 连接中' : '实时 · 断开');
+    el.title = rt.state === 'open' ? 'Finnhub 逐笔成交已连接' + (rt.ticks ? '，已收到 ' + rt.ticks + ' 笔' : '；免费数据只推送美股正式交易时段（21:30–04:00 北京时间，冬令时 22:30–05:00）') +
+      '。点击更换 API key' : '点击更换 API key';
+    const ab = $('#btnAlert');
+    if (ab) ab.classList.toggle('on', !!(window.Notification && Notification.permission === 'granted'));
+  }
+
+  function onTrade(p, t) {
+    const et = etParts(t);
+    const ses = sessionOf(et.min);
+    if (et.date < DATA.as_of || (et.date === DATA.as_of && ses !== 'post')) return;
+    if (!rt.day || rt.day.date !== et.date) rt.day = { date: et.date, open: p, high: p, low: p };
+    rt.day.high = Math.max(rt.day.high, p);
+    rt.day.low = Math.min(rt.day.low, p);
+    rt.ticks++;
+    rt.lastTick = Date.now();
+    DATA.live = { price: p, time: new Date(t).toISOString(), session: ses, date: et.date, high: rt.day.high, low: rt.day.low,
+      prev_close: DATA.last_close, chg_pct: (p / DATA.last_close - 1) * 100, src: 'tick' };
+    allKeyLevels().forEach(function (lv) { feedLevel(lv, p); });
+    scheduleLive();
+  }
+
+  function rtConnect() {
+    if (typeof WebSocket === 'undefined' || !DATA.symbol) return;
+    try { if (rt.ws) rt.ws.close(); } catch (e) { /* */ }
+    rt.state = 'connecting';
+    rtChip();
+    const ws = new WebSocket('wss://ws.finnhub.io?token=' + encodeURIComponent(fhKey()));
+    rt.ws = ws;
+    ws.onopen = function () {
+      rt.state = 'open';
+      rt.retry = 0;
+      ws.send(JSON.stringify({ type: 'subscribe', symbol: DATA.symbol }));
+      rtChip();
+    };
+    ws.onmessage = function (ev) {
+      let m;
+      try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (m.type !== 'trade' || !m.data) return;
+      m.data.forEach(function (d) { if (d.s === DATA.symbol && d.p > 0) onTrade(d.p, d.t); });
+    };
+    ws.onclose = function () {
+      if (rt.ws !== ws) return;
+      rt.state = 'off';
+      rtChip();
+      rt.retry = Math.min(6, rt.retry + 1);
+      setTimeout(rtConnect, 2500 * Math.pow(2, rt.retry));
+    };
+    ws.onerror = function () { /* onclose follows */ };
+  }
+
+  function rtStart() {
+    if (DATA.live) {
+      DATA.live.src = 'poll';
+      allKeyLevels().forEach(function (lv) { feedLevel(lv, DATA.live.price, DATA.live); });
+    }
+    renderLive();
+    rtConnect();
+    setInterval(rtChip, 15000);
+    const chip = $('#rtChip');
+    if (chip) chip.addEventListener('click', function () {
+      const v = window.prompt('Finnhub API key（只存在这个浏览器里；留空恢复默认）', '');
+      if (v === null) return;
+      try { if (v.trim()) localStorage.setItem('levels.fhkey', v.trim()); else localStorage.removeItem('levels.fhkey'); } catch (e) { /* */ }
+      rtConnect();
+    });
+    const ab = $('#btnAlert');
+    if (ab) ab.addEventListener('click', function () {
+      if (!window.Notification) { window.alert('这个浏览器不支持通知'); return; }
+      Notification.requestPermission().then(rtChip);
+    });
   }
 
   function judgeHtml(k, w, o) {
@@ -793,7 +989,7 @@
     $('#guideSub').textContent = w.label + '（' + w.from + ' 起）· 概率模型用 ' + (km.n_symbols || '—') + ' 只股票 × ' + (km.years || '—') + ' 年训练';
     let html = '';
     if (k && k.levels.length) {
-      html += liveHtml(k) + judgeHtml(k, w, o);
+      html += '<div id="liveBox">' + liveHtml(k, w, km) + '</div>' + judgeHtml(k, w, o);
       k.levels.forEach(function (lv, i) {
         html += keyCard(k, lv, i, rg, km);
         if (i < k.zones.length) html += zoneCard(k.zones[i], i, o, w, k);
@@ -2228,6 +2424,7 @@
     bindPlaybackControls();
     bindSignalControls();
     bindViews();
+    rtStart();
     const hash = (location.hash || '').replace('#', '');
     const start = VIEWS.indexOf(hash) >= 0 ? hash : (model() ? 'signal' : 'observe');
     switchView(start);
