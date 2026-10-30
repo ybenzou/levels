@@ -13,6 +13,9 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
   height: 100%;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
   background: var(--bg);
   color: var(--ink);
   font-family: var(--font);
@@ -21,13 +24,16 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 .app {
-  min-height: 100dvh;
+  height: 100%;
+  height: 100dvh;
+  max-height: 100dvh;
   max-width: 100%;
   margin: 0;
   background: var(--paper);
   border: none;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 /* —— Masthead —— */
@@ -36,7 +42,7 @@ html, body {
   grid-template-columns: auto 1fr auto;
   align-items: end;
   gap: 12px 20px;
-  padding: 10px 14px 8px;
+  padding: 6px 12px 5px;
   border-bottom: 2px solid var(--line);
   flex-shrink: 0;
 }
@@ -48,11 +54,11 @@ html, body {
   font-weight: 500;
 }
 .mast h1 {
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.04em;
   line-height: 0.95;
-  margin-top: 2px;
+  margin-top: 1px;
 }
 .mast-c {
   font-size: 12px;
@@ -103,7 +109,7 @@ html, body {
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  padding: 8px 16px;
+  padding: 6px 14px;
   cursor: pointer;
   margin-bottom: -1px;
 }
@@ -115,32 +121,53 @@ html, body {
 .tab:hover { color: var(--ink); }
 
 /* —— Views —— */
-.view { display: none; flex: 1; min-height: 0; flex-direction: column; }
+.view {
+  display: none;
+  flex: 1 1 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
 .view.on { display: flex; }
 .view[hidden] { display: none !important; }
+/* data tabs may scroll inside the locked shell */
+#view-levels.view.on,
+#view-hold.view.on,
+#view-break.view.on {
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
 
-/* —— Observe: chart dominates —— */
+/* —— Observe: fills remaining viewport exactly —— */
 .obs {
   display: grid;
-  grid-template-columns: 1fr 280px;
-  flex: 1;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  grid-template-rows: minmax(0, 1fr);
+  flex: 1 1 0;
   min-height: 0;
-  height: calc(100dvh - 92px);
+  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
+  align-content: stretch;
 }
 .chart-pane {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
   border-right: 1px solid var(--line);
   background: var(--paper);
+  position: relative;
 }
 .tool {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 4px 10px;
   border-bottom: 1px solid var(--hair);
   flex-shrink: 0;
 }
@@ -174,34 +201,49 @@ html, body {
 .tog.ghost { border: 1px solid var(--hair); margin-left: auto; }
 
 #chart {
-  flex: 1;
+  flex: 1 1 0;
   width: 100%;
   min-height: 0;
-  height: 100%;
+  height: auto;
+  position: relative;
+}
+/* compact footer inside chart column — never grows past viewport */
+.chart-foot {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--hair);
+  background: var(--paper);
+  max-height: 40px;
+  overflow: hidden;
 }
 .ohlc {
   flex-shrink: 0;
-  padding: 4px 10px;
-  border-top: 1px solid var(--hair);
+  padding: 2px 10px;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
   color: var(--muted);
-  min-height: 1.5em;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ohlc strong { color: var(--ink); font-weight: 700; }
 .legend {
   flex-shrink: 0;
   display: flex;
-  flex-wrap: wrap;
-  gap: 2px 12px;
-  padding: 4px 10px 6px;
+  flex-wrap: nowrap;
+  gap: 2px 10px;
+  padding: 1px 10px 3px;
   border-top: 1px solid var(--hair);
-  font-size: 10px;
+  font-size: 9px;
   font-variant-numeric: tabular-nums;
   color: var(--muted);
-  max-height: 52px;
-  overflow: auto;
+  line-height: 1.3;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 .legend .lg {
   display: inline-flex;
@@ -221,15 +263,19 @@ html, body {
 .rail {
   display: flex;
   flex-direction: column;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   background: var(--paper);
-  min-height: 0;
+  align-self: stretch;
 }
 .rail-h {
-  padding: 8px 12px;
+  padding: 6px 10px;
   border-bottom: 1px solid var(--line);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -246,7 +292,8 @@ html, body {
 }
 .rail-sec {
   border-bottom: 1px solid var(--hair);
-  padding: 8px 0 10px;
+  padding: 6px 0 8px;
+  flex-shrink: 0;
 }
 .sec-l {
   padding: 0 12px 6px;
@@ -282,7 +329,7 @@ html, body {
   margin-bottom: 2px;
 }
 .cell .val {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
   letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
@@ -450,18 +497,25 @@ tr:hover td { background: #f5f5f1; }
 }
 
 @media (max-width: 960px) {
+  /* stacked observe: still no page scroll — chart + rail share remaining height */
   .obs {
     grid-template-columns: 1fr;
-    height: auto;
-    min-height: calc(100dvh - 92px);
+    grid-template-rows: minmax(0, 1fr) minmax(140px, 38%);
+    height: 100%;
+    max-height: 100%;
   }
   .chart-pane {
     border-right: 0;
     border-bottom: 1px solid var(--line);
-    height: min(58dvh, 520px);
-    min-height: 320px;
+    height: auto;
+    min-height: 0;
+    max-height: none;
   }
-  .rail { max-height: none; }
+  .rail {
+    max-height: none;
+    height: auto;
+    min-height: 0;
+  }
   .band { grid-template-columns: repeat(2, 1fr); }
   .band .si:nth-child(2n) { border-right: 0; }
   .band .si { border-bottom: 1px solid var(--hair); }
@@ -474,13 +528,14 @@ tr:hover td { background: #f5f5f1; }
 @media (max-width: 560px) {
   .mast {
     grid-template-columns: 1fr auto;
-    gap: 6px 10px;
-    padding: 8px 10px 6px;
+    gap: 4px 8px;
+    padding: 5px 8px 4px;
   }
   .mast-c { grid-column: 1 / -1; font-size: 11px; }
-  .mast h1 { font-size: 22px; }
-  .tab { padding: 7px 12px; font-size: 11px; }
-  .chart-pane { height: min(50dvh, 420px); min-height: 280px; }
+  .mast h1 { font-size: 18px; }
+  .tab { padding: 5px 10px; font-size: 11px; }
+  .obs { grid-template-rows: minmax(0, 1fr) minmax(120px, 36%); }
+  .chart-foot { max-height: 36px; }
   .sep { display: none; }
   .tog { padding: 4px 6px; }
   table { min-width: 420px; font-size: 11px; }

@@ -214,13 +214,26 @@
         '  C <strong>' + d.close.toFixed(2) + '</strong>';
     });
 
-    const ro = new ResizeObserver(function () {
-      if (chart && el.clientWidth > 0 && el.clientHeight > 0) {
-        chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
+    function syncChartSize() {
+      if (!chart || !el) return;
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w > 0 && h > 0) {
+        chart.applyOptions({ width: w, height: h });
       }
-    });
+    }
+    const ro = new ResizeObserver(function () { syncChartSize(); });
     ro.observe(el);
-    chart.applyOptions({ width: el.clientWidth, height: el.clientHeight || 400 });
+    const pane = el.closest('.chart-pane');
+    if (pane) ro.observe(pane);
+    const obs = el.closest('.obs');
+    if (obs) ro.observe(obs);
+    window.addEventListener('resize', syncChartSize);
+    // double-rAF: wait for flex lock to settle before first paint size
+    requestAnimationFrame(function () {
+      requestAnimationFrame(syncChartSize);
+    });
+    syncChartSize();
   }
 
   function ensureChartSized() {
@@ -229,6 +242,10 @@
     if (el && el.clientWidth > 0 && el.clientHeight > 0) {
       chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
       chart.timeScale().fitContent();
+    } else {
+      requestAnimationFrame(function () {
+        requestAnimationFrame(ensureChartSized);
+      });
     }
   }
 
