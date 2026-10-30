@@ -168,8 +168,9 @@ def main():
     print("ridge OOS IC", v["ridge"]["oos_ic"], v["ridge"]["ic_by_period"])
     print("tilt", v["tilt"])
     print("verdict", v["verdict"])
-    print("key levels OOS", {k: km["oos"][k] for k in ("react_auc", "reach_auc")},
-          {k: {s: x["edge"] for s, x in d.items()} for k, d in km["oos"]["edge"].items()})
+    for y, o in km["oos"].items():
+        print(f"key levels OOS {y}: best={o['best']} rate={o['rate']} pred={o['pred']} n={o['n_test']}",
+              {v: (o[v]["brier"], o[v]["auc"], o[v].get("skill")) for v in keylevels.VARIANTS})
 
 
 if __name__ == "__main__":

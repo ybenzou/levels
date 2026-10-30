@@ -353,7 +353,8 @@ def window_guide(bars, ind, nb, wl, pooled, own_hold, uni, ft_cache, km=None):
         kl = keylevels.judge(km, bars, ind, nb)
         if kl:
             kz = _zones(kl, win, px, a, p, boll, ind, uni, ft_cache)
-            key = {"levels": kl, "zones": kz, "summary": _summary(kl, kz, px)}
+            key = {"levels": kl, "zones": kz, "summary": _summary(kl, kz, px),
+                   "history": keylevels.history(km, bars, ind, nb)}
 
     prof = None
     if p:
