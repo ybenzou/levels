@@ -143,9 +143,9 @@
   }
 
   function lineColor(kind, priority) {
-    if (kind === 'resistance') return priority <= 1 ? 'rgba(200,16,46,0.95)' : 'rgba(200,16,46,0.4)';
-    if (kind === 'support') return priority <= 1 ? 'rgba(10,10,10,0.9)' : 'rgba(10,10,10,0.35)';
-    return 'rgba(92,92,92,0.85)';
+    if (kind === 'resistance') return priority <= 1 ? 'rgba(212,120,58,0.95)' : 'rgba(212,120,58,0.45)';
+    if (kind === 'support') return priority <= 1 ? 'rgba(143,188,90,0.95)' : 'rgba(143,188,90,0.4)';
+    return 'rgba(232,168,56,0.85)';
   }
 
   function clearPriceLines() {
@@ -175,9 +175,9 @@
     if (filters.vrvp && DATA.state && DATA.state.vrvp) {
       const v = DATA.state.vrvp;
       [
-        { price: v.poc, color: 'rgba(200,16,46,0.95)', w: 2, title: 'POC', style: LightweightCharts.LineStyle.Solid },
-        { price: v.vah, color: 'rgba(10,10,10,0.55)', w: 1, title: 'VAH', style: LightweightCharts.LineStyle.Dashed },
-        { price: v.val, color: 'rgba(10,10,10,0.55)', w: 1, title: 'VAL', style: LightweightCharts.LineStyle.Dashed },
+        { price: v.poc, color: 'rgba(232,168,56,0.95)', w: 2, title: 'POC', style: LightweightCharts.LineStyle.Solid },
+        { price: v.vah, color: 'rgba(230,220,196,0.45)', w: 1, title: 'VAH', style: LightweightCharts.LineStyle.Dashed },
+        { price: v.val, color: 'rgba(230,220,196,0.45)', w: 1, title: 'VAL', style: LightweightCharts.LineStyle.Dashed },
       ].forEach(function (cfg) {
         if (cfg.price == null) return;
         const pl = candleSeries.createPriceLine({
@@ -256,9 +256,9 @@
       if (y1 != null && y2 != null) {
         const top = Math.min(y1, y2);
         const bot = Math.max(y1, y2);
-        ctx.fillStyle = 'rgba(10,10,10,0.055)';
+        ctx.fillStyle = 'rgba(232,168,56,0.08)';
         ctx.fillRect(0, top, w, bot - top);
-        ctx.strokeStyle = 'rgba(10,10,10,0.25)';
+        ctx.strokeStyle = 'rgba(232,168,56,0.28)';
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 3]);
         ctx.beginPath();
@@ -277,12 +277,12 @@
       if (y == null) return;
       const bandH = 7;
       if (tag === 'hvn') {
-        ctx.fillStyle = 'rgba(10,10,10,0.14)';
+        ctx.fillStyle = 'rgba(143,188,90,0.18)';
         ctx.fillRect(0, y - bandH / 2, w, bandH);
       } else if (tag === 'lvn') {
-        ctx.fillStyle = 'rgba(200,16,46,0.10)';
+        ctx.fillStyle = 'rgba(212,120,58,0.14)';
         ctx.fillRect(0, y - bandH / 2, w, bandH);
-        ctx.strokeStyle = 'rgba(200,16,46,0.35)';
+        ctx.strokeStyle = 'rgba(212,120,58,0.4)';
         ctx.setLineDash([2, 3]);
         ctx.beginPath();
         ctx.moveTo(0, y); ctx.lineTo(w, y);
@@ -308,7 +308,7 @@
       const ratio = prof.vol[i] / prof.max;
       const bw = ratio * (profileW - 4);
       const inVA = (vrvp.val != null && vrvp.vah != null && pLo >= vrvp.val && pHi <= vrvp.vah);
-      ctx.fillStyle = inVA ? 'rgba(10,10,10,0.38)' : 'rgba(10,10,10,0.16)';
+      ctx.fillStyle = inVA ? 'rgba(232,168,56,0.45)' : 'rgba(154,144,120,0.28)';
       ctx.fillRect(x0 + (profileW - 4 - bw), top, bw, bh);
     }
 
@@ -316,7 +316,7 @@
     if (vrvp.poc != null) {
       const yp = yOf(vrvp.poc);
       if (yp != null) {
-        ctx.strokeStyle = 'rgba(200,16,46,0.9)';
+        ctx.strokeStyle = 'rgba(232,168,56,0.95)';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(x0, yp);
@@ -326,8 +326,8 @@
     }
 
     // Labels
-    ctx.fillStyle = 'rgba(10,10,10,0.55)';
-    ctx.font = '9px Helvetica Neue, Helvetica, Arial, sans-serif';
+    ctx.fillStyle = 'rgba(232,168,56,0.7)';
+    ctx.font = '9px IBM Plex Mono, SF Mono, Menlo, monospace';
     ctx.textAlign = 'right';
     ctx.fillText('VRVP', w - 6, 12);
   }
@@ -338,29 +338,29 @@
     el.innerHTML = '';
     chart = LightweightCharts.createChart(el, {
       layout: {
-        background: { type: 'solid', color: '#fafaf8' },
-        textColor: '#5c5c5c',
+        background: { type: 'solid', color: '#12140e' },
+        textColor: '#9a9078',
         fontSize: 11,
-        fontFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif',
+        fontFamily: '"IBM Plex Mono", "SF Mono", Menlo, Consolas, monospace',
       },
       grid: {
-        vertLines: { color: '#e4e4de' },
-        horzLines: { color: '#e4e4de' },
+        vertLines: { color: '#2a2e22' },
+        horzLines: { color: '#2a2e22' },
       },
       crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-      rightPriceScale: { borderColor: '#0a0a0a', scaleMargins: { top: 0.04, bottom: 0.06 } },
-      timeScale: { borderColor: '#0a0a0a', timeVisible: false, rightOffset: 4 },
+      rightPriceScale: { borderColor: '#4e5240', scaleMargins: { top: 0.04, bottom: 0.06 } },
+      timeScale: { borderColor: '#4e5240', timeVisible: false, rightOffset: 4 },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
       handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
     });
 
     candleSeries = chart.addCandlestickSeries({
-      upColor: '#0a0a0a',
-      downColor: '#c8102e',
-      borderUpColor: '#0a0a0a',
-      borderDownColor: '#c8102e',
-      wickUpColor: '#0a0a0a',
-      wickDownColor: '#c8102e',
+      upColor: '#8fbc5a',
+      downColor: '#d4783a',
+      borderUpColor: '#8fbc5a',
+      borderDownColor: '#d4783a',
+      wickUpColor: '#8fbc5a',
+      wickDownColor: '#d4783a',
     });
 
     let candles = [];
@@ -574,8 +574,8 @@
     const plotH = cssH - padT - padB;
     const plotW = cssW - padL - padR;
     if (!prof) {
-      ctx.fillStyle = '#5c5c5c';
-      ctx.font = '11px Helvetica Neue, Helvetica, Arial';
+      ctx.fillStyle = '#9a9078';
+      ctx.font = '11px IBM Plex Mono, SF Mono, Menlo, monospace';
       ctx.fillText('无剖面', padL, 20);
       return;
     }
@@ -588,7 +588,7 @@
     if (vrvp.val != null && vrvp.vah != null) {
       const y1 = yOf(vrvp.vah);
       const y2 = yOf(vrvp.val);
-      ctx.fillStyle = 'rgba(10,10,10,0.06)';
+      ctx.fillStyle = 'rgba(232,168,56,0.08)';
       ctx.fillRect(padL, Math.min(y1, y2), plotW, Math.abs(y2 - y1));
     }
 
@@ -603,7 +603,7 @@
       const bw = ratio * plotW;
       const mid = (pLo + pHi) / 2;
       const inVA = vrvp.val != null && vrvp.vah != null && mid >= vrvp.val && mid <= vrvp.vah;
-      ctx.fillStyle = inVA ? 'rgba(10,10,10,0.45)' : 'rgba(10,10,10,0.18)';
+      ctx.fillStyle = inVA ? 'rgba(232,168,56,0.5)' : 'rgba(154,144,120,0.28)';
       ctx.fillRect(padL, top, bw, bh);
     }
 
@@ -612,7 +612,7 @@
       const tag = classifyVrvpLevel(lv);
       if (tag !== 'hvn' && tag !== 'lvn') return;
       const y = yOf(lv.price);
-      ctx.strokeStyle = tag === 'hvn' ? 'rgba(10,10,10,0.7)' : 'rgba(200,16,46,0.7)';
+      ctx.strokeStyle = tag === 'hvn' ? 'rgba(143,188,90,0.8)' : 'rgba(212,120,58,0.8)';
       ctx.lineWidth = tag === 'hvn' ? 2 : 1;
       ctx.setLineDash(tag === 'lvn' ? [3, 2] : []);
       ctx.beginPath();
@@ -620,17 +620,17 @@
       ctx.lineTo(padL + plotW, y);
       ctx.stroke();
       ctx.setLineDash([]);
-      ctx.fillStyle = tag === 'hvn' ? '#0a0a0a' : '#c8102e';
-      ctx.font = '8px Helvetica Neue, Helvetica, Arial';
+      ctx.fillStyle = tag === 'hvn' ? '#8fbc5a' : '#d4783a';
+      ctx.font = '8px IBM Plex Mono, SF Mono, Menlo, monospace';
       ctx.textAlign = 'left';
       ctx.fillText(tag.toUpperCase(), padL + plotW + 2, y + 3);
     });
 
     // POC / VAL / VAH labels
     [
-      { p: vrvp.poc, lab: 'POC', c: '#c8102e' },
-      { p: vrvp.vah, lab: 'VAH', c: '#0a0a0a' },
-      { p: vrvp.val, lab: 'VAL', c: '#0a0a0a' },
+      { p: vrvp.poc, lab: 'POC', c: '#e8a838' },
+      { p: vrvp.vah, lab: 'VAH', c: '#e6dcc4' },
+      { p: vrvp.val, lab: 'VAL', c: '#e6dcc4' },
     ].forEach(function (x) {
       if (x.p == null) return;
       const y = yOf(x.p);
@@ -641,7 +641,7 @@
       ctx.lineTo(padL + plotW + 2, y);
       ctx.stroke();
       ctx.fillStyle = x.c;
-      ctx.font = 'bold 9px Helvetica Neue, Helvetica, Arial';
+      ctx.font = 'bold 9px IBM Plex Mono, SF Mono, Menlo, monospace';
       ctx.textAlign = 'left';
       ctx.fillText(x.lab, padL + plotW + 2, y - 2);
     });
@@ -649,7 +649,7 @@
     // last price
     const last = Number(DATA.last_close);
     const yl = yOf(last);
-    ctx.strokeStyle = 'rgba(200,16,46,0.55)';
+    ctx.strokeStyle = 'rgba(232,168,56,0.65)';
     ctx.setLineDash([2, 2]);
     ctx.beginPath();
     ctx.moveTo(padL, yl);
@@ -889,7 +889,7 @@
     try {
       DATA = await loadData();
     } catch (e) {
-      $('#app').innerHTML = '<div style="padding:20px;font-family:Helvetica,Arial,sans-serif">无法加载 data.json：' + esc(e.message) + '</div>';
+      $('#app').innerHTML = '<div style="padding:20px;font-family:IBM Plex Mono,SF Mono,Menlo,monospace;background:#1e2118;color:#e6dcc4">无法加载 data.json：' + esc(e.message) + '</div>';
       return;
     }
     profileCache = null;
