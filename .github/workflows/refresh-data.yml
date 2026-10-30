@@ -1,0 +1,42 @@
+name: Refresh data
+
+on:
+  schedule:
+    # 00:00 UTC Tue–Sat = 08:00 HKT, after each US session (Mon–Fri) has closed.
+    - cron: "0 0 * * 2-6"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-data
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build data
+        run: python3 pipeline/build.py
+
+      - name: Commit and push
+        run: |
+          git config user.name "levels-bot"
+          git config user.email "levels-bot@users.noreply.github.com"
+          git add data data.json fallback-data.js
+          if git diff --cached --quiet; then
+            echo "No data changes."
+            exit 0
+          fi
+          git commit -m "data: refresh $(date -u +%F)"
+          # Other refreshers may also write data.json; on conflict keep this run's output.
+          git pull --rebase -X theirs origin main
+          git push origin HEAD:main
