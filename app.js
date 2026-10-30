@@ -361,9 +361,28 @@
   }
 
   function kindRgb(kind) { return kind === 'resistance' ? '255,184,58' : '159,212,95'; }
-  function swatch(group, kind, w) {
-    const st = group === 'key' ? { w: w || 2, dash: '' } : (GROUP_STYLE[group] || GROUP_STYLE.range);
-    const col = kind === 'resistance' ? '#ffb83a' : (kind === 'support' ? '#9fd45f' : '#c9bfa4');
+  const KEY_PAL = {
+    resistance: ['255,99,64', '255,184,58', '226,206,150'],
+    support: ['110,230,120', '70,200,230', '165,170,235'],
+  };
+  function keyRank(k, lv) {
+    const same = k.levels.filter(function (x) { return x.kind === lv.kind; })
+      .sort(function (a, b) { return lv.kind === 'resistance' ? a.price - b.price : b.price - a.price; });
+    return same.indexOf(lv) + 1;
+  }
+  function keyRgb(k, lv) {
+    const pal = KEY_PAL[lv.kind] || KEY_PAL.support;
+    return pal[Math.min(pal.length, Math.max(1, keyRank(k, lv))) - 1];
+  }
+  function keyShort(k, lv) { return (lv.kind === 'resistance' ? 'R' : 'S') + keyRank(k, lv); }
+  function keyDash(k, lv) { return keyRank(k, lv) >= 3 ? '5 3' : ''; }
+  function keyTag(k, lv) { return '<span class="kt" style="color:rgb(' + keyRgb(k, lv) + ')">' + keyName(k, lv) + '</span>'; }
+  function keySwatch(k, lv, hot) {
+    return swatch('key', lv.kind, (KEY_W[lv.salience] || 2) + (hot ? 1 : 0), keyRgb(k, lv), keyDash(k, lv));
+  }
+  function swatch(group, kind, w, rgb, dash) {
+    const st = group === 'key' ? { w: w || 2, dash: dash || '' } : (GROUP_STYLE[group] || GROUP_STYLE.range);
+    const col = rgb ? 'rgb(' + rgb + ')' : (kind === 'resistance' ? '#ffb83a' : (kind === 'support' ? '#9fd45f' : '#c9bfa4'));
     return '<svg class="sw" width="22" height="8" aria-hidden="true"><line x1="0" y1="4" x2="22" y2="4" stroke="' + col +
       '" stroke-width="' + (st.w + 0.5) + '"' + (st.dash ? ' stroke-dasharray="' + st.dash + '"' : '') + '/></svg>';
   }
@@ -390,7 +409,7 @@
     return {
       hold: '守住 = 碰到后先' + (res ? '回落' : '反弹') + '到 <b>' + lv.target.toFixed(2) + '</b>（' + (res ? '−' : '+') + '1 ATR）',
       fail: '突破 = 收盘' + (res ? '站上' : '跌破') + ' <b>' + lv.fail.toFixed(2) + '</b>；延续 = 再走到 <b>' + lv.follow_to.toFixed(2) + '</b>',
-      next: nx ? '下一个关键位 ' + keyName(k, nx) + ' <b>' + nx.price.toFixed(2) + '</b>' : '窗口内' + (res ? '上方' : '下方') + '没有更多关键位'
+      next: nx ? '下一个关键位 ' + keyTag(k, nx) + ' <b>' + nx.price.toFixed(2) + '</b>' : '窗口内' + (res ? '上方' : '下方') + '没有更多关键位'
     };
   }
 
@@ -458,16 +477,21 @@
         if (obs.hotZone === 'k' + j) band(z.lo, z.hi, 'rgba(255,208,120,0.12)', 'rgba(255,208,120,0.55)');
         else if (z.current) band(z.lo, z.hi, 'rgba(243,235,212,0.04)', null);
       });
+      const focus = obs.hot && obs.hot[0] === 'k';
       k.levels.forEach(function (lv, i) {
-        const a = obs.hot === 'k' + i ? 0.3 : (lv.salience === 'high' ? 0.2 : 0.12);
-        band(lv.lo, lv.hi, 'rgba(' + kindRgb(lv.kind) + ',' + a + ')', null);
+        const hot = obs.hot === 'k' + i;
+        const r = keyRank(k, lv);
+        let a = r === 1 ? 0.16 : (r === 2 ? 0.09 : 0.05);
+        if (focus) a = hot ? 0.3 : a * 0.4;
+        band(lv.lo, lv.hi, 'rgba(' + keyRgb(k, lv) + ',' + a + ')', hot ? 'rgba(' + keyRgb(k, lv) + ',0.7)' : null);
       });
     }
   }
 
   function lineSpec(e, hot) {
     if (e.key) {
-      return { color: 'rgba(' + kindRgb(e.kind) + ',' + (hot ? 1 : 0.92) + ')', lineWidth: (KEY_W[e.strength] || 2) + (hot ? 1 : 0) };
+      const focus = obs.hot && obs.hot[0] === 'k';
+      return { color: 'rgba(' + e.rgb + ',' + (hot ? 1 : (focus ? 0.3 : 0.95)) + ')', lineWidth: (KEY_W[e.strength] || 2) + (hot ? 1 : 0) };
     }
     const st = GROUP_STYLE[e.group] || GROUP_STYLE.range;
     return { color: 'rgba(' + kindRgb(e.kind) + ',' + (hot ? 0.95 : 0.42) + ')', lineWidth: st.w + (hot ? 1 : 0) };
@@ -483,6 +507,7 @@
       const sp = lineSpec(e, e.id === obs.hot);
       e.handle = candleSeries.createPriceLine({
         price: e.price, color: sp.color, lineWidth: sp.lineWidth, lineStyle: style, axisLabelVisible: e.key || obs.ref,
+        title: e.title || '',
       });
       obsLines.push(e);
     };
@@ -494,7 +519,8 @@
     updateLiveLine();
     if (w.key) {
       w.key.levels.forEach(function (lv, i) {
-        add({ id: 'k' + i, price: lv.price, kind: lv.kind, strength: lv.salience, key: true }, LightweightCharts.LineStyle.Solid);
+        add({ id: 'k' + i, price: lv.price, kind: lv.kind, strength: lv.salience, key: true, rgb: keyRgb(w.key, lv), title: keyShort(w.key, lv) },
+          keyRank(w.key, lv) >= 3 ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid);
       });
     }
   }
@@ -508,7 +534,7 @@
     const id = obs.hot;
     if (id && id[0] === 'k' && w.key) {
       const lv = w.key.levels[Number(id.slice(1))];
-      el.innerHTML = swatch('key', lv.kind, KEY_W[lv.salience]) + '<b>' + keyName(w.key, lv) + '</b> <span class="px">' +
+      el.innerHTML = keySwatch(w.key, lv, true) + '<b>' + keyTag(w.key, lv) + '</b> <span class="px">' +
         lv.price.toFixed(2) + '</span> <span class="' + (lv.kind === 'resistance' ? 'kind-res' : 'kind-sup') + '">' +
         pctPts(lv.dist_pct, 1) + '</span> · 10 日内碰到 ' + pct(lv.reach) + ' · 碰到后守住 ' + pct(lv.hold) +
         ' / 突破 ' + pct(lv.brk) + ' · 突破后延续 ' + pct(lv.follow) + ' · ' + keyPlan(w.key, lv).fail;
@@ -536,8 +562,9 @@
     const prev = obs.hot;
     obs.hot = line;
     obs.hotZone = zone;
+    const focusChanged = (prev && prev[0] === 'k') !== (line && line[0] === 'k');
     obsLines.forEach(function (e) {
-      if (e.id !== prev && e.id !== line) return;
+      if (e.id !== prev && e.id !== line && !(focusChanged && e.key)) return;
       e.handle.applyOptions(lineSpec(e, e.id === line));
     });
     const list = $('#guideList');
@@ -594,8 +621,8 @@
     const cell = function (y, label) {
       return '<div><span>' + label + ' <b>' + pct(lv[y]) + '</b></span>' + probBar(lv[y], c === 'res' ? 'r' : '') + '</div>';
     };
-    return '<div class="gl key ' + c + ' sl-' + lv.salience + '" data-li="k' + i + '">' +
-      '<div class="gl-h">' + swatch('key', lv.kind, KEY_W[lv.salience]) + '<b class="px">' + lv.price.toFixed(2) + '</b>' +
+    return '<div class="gl key ' + c + ' sl-' + lv.salience + '" data-li="k' + i + '" style="--kc:' + keyRgb(k, lv) + '">' +
+      '<div class="gl-h">' + keySwatch(k, lv) + '<b class="px">' + lv.price.toFixed(2) + '</b>' +
       '<span class="nm">' + keyName(k, lv) + '</span><span class="stg" title="结构分 ' + lv.score.toFixed(1) +
       '：转折次数、大级别转折、窗口极值等加起来">显著度 ' + lv.salience_zh + '</span>' +
       '<span class="d ' + (c === 'res' ? 'kind-res' : 'kind-sup') + '">' + pctPts(lv.dist_pct, 1) + ' · ' +
@@ -622,7 +649,7 @@
     const up = k.levels[j], dn = k.levels[j + 1];
     const text = (z.tags || []).map(function (t) { return esc((zt[t] || {}).text || ''); }).join('');
     return '<div class="gz cur" data-zi="k' + j + '">' + head +
-      '<div class="gz-now">▶ ' + (DATA.live ? '收盘' : '现价') + ' <b>' + w.close.toFixed(2) + '</b> 在 ' + keyName(k, dn) + ' 和 ' + keyName(k, up) + ' 之间</div>' +
+      '<div class="gz-now">▶ ' + (DATA.live ? '收盘' : '现价') + ' <b>' + w.close.toFixed(2) + '</b> 在 ' + keyTag(k, dn) + ' 和 ' + keyTag(k, up) + ' 之间</div>' +
       '<div class="gz-t">' + text + '</div></div>';
   }
 
@@ -719,7 +746,7 @@
   function liveHtml(k, w, km) {
     const q = DATA.live;
     if (!q || !k) return '';
-    const nm = function (lv) { return keyName(k, lv) + ' <b>' + lv.price.toFixed(2) + '</b>'; };
+    const nm = function (lv) { return keyTag(k, lv) + ' <b>' + lv.price.toFixed(2) + '</b>'; };
     const px = q.price;
     const ses = liveLabel(q);
     const items = [];
@@ -782,7 +809,7 @@
     if (!q) return;
     if (liveLine) liveLine.applyOptions({ price: q.price, title: liveLabel(q) });
     else liveLine = candleSeries.createPriceLine({
-      price: q.price, color: 'rgba(243,235,212,0.85)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed,
+      price: q.price, color: 'rgba(255,255,255,0.9)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed,
       axisLabelVisible: true, title: liveLabel(q),
     });
     if (rt.day && rt.day.date > DATA.as_of && q.src === 'tick') {
@@ -882,7 +909,7 @@
     const s = k.summary || {};
     const find = function (p) { return k.levels.filter(function (x) { return x.price === p; })[0]; };
     const R1 = find(s.r1), S1 = find(s.s1), R2 = find(s.r2), S2 = find(s.s2);
-    const nm = function (lv) { return lv ? keyName(k, lv) + ' <b>' + lv.price.toFixed(2) + '</b>' : ''; };
+    const nm = function (lv) { return lv ? keyTag(k, lv) + ' <b>' + lv.price.toFixed(2) + '</b>' : ''; };
     const items = [];
     if (R1 && S1) {
       items.push((DATA.live ? '收盘 ' : '现价 ') + '<b>' + w.close.toFixed(2) + '</b> 夹在 ' + nm(S1) + '（' + pctPts(S1.dist_pct, 1) + '）和 ' + nm(R1) +
@@ -1021,8 +1048,15 @@
       'ATR = 近 14 日平均每天的波动幅度。<br>' + esc(km.def || '');
     const key = $('#obsKey');
     if (key) {
-      let kh = '<span class="ky">' + swatch('key', 'support', 3) + '关键位（越粗越显著）</span>';
-      if (obs.hist) kh += '<span class="ky">' + swatch('swing', 'support') + '回放：当天画的 R1/S1 · 守 = 守住 · 破 = 被突破</span>';
+      let kh = '';
+      if (w.key) {
+        const lv = w.key.levels.slice().sort(function (a, b) { return b.price - a.price; });
+        kh += lv.map(function (x) {
+          return '<span class="ky">' + keySwatch(w.key, x) + '<b style="color:rgb(' + keyRgb(w.key, x) + ')">' + keyShort(w.key, x) + '</b></span>';
+        }).join('') + '<span class="ky muted">线越粗越显著</span>';
+      }
+      if (obs.hist) kh += '<span class="ky">' + swatch('key', 'resistance', 1, KEY_PAL.resistance[0], '1.5 2.5') +
+        swatch('key', 'support', 1, KEY_PAL.support[0], '1.5 2.5') + '回放：当天画的 R1/S1 · <b style="color:#f3ebd4">守</b> 守住 · <b style="color:#ff4fd8">破</b> 被突破</span>';
       if (obs.ref) {
         const groups = {};
         w.lines.forEach(function (ln) { groups[ln.group] = true; });
@@ -1068,7 +1102,7 @@
       ms.push({
         time: toUnix(e.rdate),
         position: e.side === 'support' ? 'belowBar' : 'aboveBar',
-        color: held ? '#9fff5c' : '#ff6b4a',
+        color: held ? '#f3ebd4' : '#ff4fd8',
         shape: held ? 'circle' : 'square',
         size: 0.7,
         text: held ? '守' : '破',
@@ -1142,7 +1176,7 @@
     const step = LightweightCharts.LineType ? LightweightCharts.LineType.WithSteps : 1;
     ['r1', 's1'].forEach(function (key) {
       histSeries[key] = chart.addLineSeries({
-        color: key === 'r1' ? 'rgba(255,184,58,0.6)' : 'rgba(159,212,95,0.6)', lineWidth: 1,
+        color: 'rgba(' + (key === 'r1' ? KEY_PAL.resistance[0] : KEY_PAL.support[0]) + ',0.5)', lineWidth: 1,
         lineStyle: LightweightCharts.LineStyle.Dotted, lineType: step, priceLineVisible: false, lastValueVisible: false,
         crosshairMarkerVisible: false, autoscaleInfoProvider: function () { return null; },
       });

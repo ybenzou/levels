@@ -1698,3 +1698,8 @@ body::after {
 .jd-n { margin-top: 6px; font-size: 12px; line-height: 1.5; color: var(--muted); }
 .rt-chip.on { color: var(--crt); border-color: rgba(159,212,95,0.6); }
 .rt-al { margin-top: 6px; padding-top: 5px; border-top: 1px dashed var(--hair); font-size: 12px; line-height: 1.6; color: var(--ink); }
+.gl.key { border-left-color: rgba(var(--kc), 0.75); border-left-width: 4px; }
+.gl.key.hot { border-left-color: rgb(var(--kc)); background: rgba(var(--kc), 0.08); }
+.gl.key .gl-h .nm { color: rgb(var(--kc)); }
+.kt { font-weight: 700; }
+.obs-key .ky b { margin-left: 3px; }
