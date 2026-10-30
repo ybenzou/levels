@@ -5,11 +5,7 @@
   const KIND_LABEL = { resistance: '压力', support: '支撑', anchor: '锚点' };
   const KIND_CLASS = { resistance: 'kind-res', support: 'kind-sup', anchor: 'kind-anc' };
 
-  const filters = {
-    kinds: { resistance: true, support: true, anchor: true },
-    preset: 'priority',
-    vrvp: true,
-  };
+  const filters = { vrvp: true };
   const lvFilters = {
     kinds: { resistance: true, support: true, anchor: true },
     preset: 'priority',
@@ -18,7 +14,6 @@
   const brkFilters = { dir: 'all' };
 
   let DATA = null;
-  let profileCache = null;
   let overlayRaf = 0;
 
   /* observe chart */
@@ -80,7 +75,7 @@
   function windowLabel(defs) {
     if (!defs) return '';
     const yrs = defs.years ? defs.years + ' 年' : (defs.window || '');
-    return yrs + (defs.n_bars ? ' · ' + defs.n_bars + 'K' : '') + (defs.display_from ? ' · 图上近1年' : '');
+    return yrs + (defs.n_bars ? ' · ' + defs.n_bars + 'K' : '') + (defs.display_from ? ' · 图上' + winLabel() : '');
   }
   function ciText(lo, hi) {
     if (lo == null || hi == null) return '';
@@ -169,62 +164,14 @@
     return null;
   }
 
-  function computeVolumeProfile(ohlcv, nBins) {
-    if (!ohlcv || !ohlcv.length) return null;
-    let lo = Infinity, hi = -Infinity;
-    ohlcv.forEach(function (b) {
-      if (b.low < lo) lo = b.low;
-      if (b.high > hi) hi = b.high;
-    });
-    if (!(hi > lo)) return null;
-    const bins = nBins || 48;
-    const step = (hi - lo) / bins;
-    const vol = new Float64Array(bins);
-    ohlcv.forEach(function (b) {
-      const v = Number(b.volume) || 0;
-      if (v <= 0) return;
-      const i0 = Math.max(0, Math.min(bins - 1, Math.floor((b.low - lo) / step)));
-      const i1 = Math.max(0, Math.min(bins - 1, Math.floor((b.high - lo) / step)));
-      const span = i1 - i0 + 1;
-      const share = v / span;
-      for (let i = i0; i <= i1; i++) vol[i] += share;
-    });
-    let max = 0, pocIdx = 0;
-    for (let i = 0; i < bins; i++) {
-      if (vol[i] > max) { max = vol[i]; pocIdx = i; }
-    }
-    const total = Array.prototype.reduce.call(vol, function (a, b) { return a + b; }, 0);
-    let covered = vol[pocIdx];
-    let L = pocIdx, R = pocIdx;
-    const target = total * 0.7;
-    while (covered < target && (L > 0 || R < bins - 1)) {
-      const left = L > 0 ? vol[L - 1] : -1;
-      const right = R < bins - 1 ? vol[R + 1] : -1;
-      if (right >= left) { R++; covered += vol[R]; }
-      else { L--; covered += vol[L]; }
-    }
-    return {
-      lo: lo, hi: hi, step: step, bins: bins, vol: vol, max: max,
-      poc: lo + (pocIdx + 0.5) * step,
-      val: lo + L * step,
-      vah: lo + (R + 1) * step,
-      total: total,
-    };
-  }
-  function getProfile() {
-    if (profileCache) return profileCache;
-    profileCache = computeVolumeProfile(DATA.ohlcv, 48);
-    return profileCache;
-  }
-
-  function candleData() {
+  function candleData(n) {
     if (DATA.ohlcv && DATA.ohlcv.length) {
-      return DATA.ohlcv.map(function (b) {
+      return (n ? DATA.ohlcv.slice(-n) : DATA.ohlcv).map(function (b) {
         return { time: toUnix(b.date), open: b.open, high: b.high, low: b.low, close: b.close };
       });
     }
     if (DATA.price_series && DATA.price_series.length) {
-      return DATA.price_series.map(function (b) {
+      return (n ? DATA.price_series.slice(-n) : DATA.price_series).map(function (b) {
         const c = b.close;
         return { time: toUnix(b.date), open: c, high: c, low: c, close: c };
       });
@@ -377,7 +324,53 @@
     });
   }
 
-  /* —— Observe VRVP overlay (unchanged logic) —— */
+  /* —— 观察：近 1/2/3 月窗口 · 每条线和每个区间的含义 —— */
+  const obs = { win: '3m', hot: -1, hotZone: -1 };
+  const AUTOSCALE_PCT = 12;
+  const GROUP_STYLE = {
+    ma: { style: 0, w: 2, zh: '均线', dash: '' },
+    boll: { style: 2, w: 1, zh: '布林', dash: '5 3' },
+    range: { style: 3, w: 1, zh: '区间高低', dash: '9 4' },
+    vrvp: { style: 0, w: 1, zh: '成交剖面', dash: '' },
+    swing: { style: 1, w: 1, zh: '前高/前低', dash: '1.5 2.5' },
+    gap: { style: 4, w: 1, zh: '缺口', dash: '1.5 5' },
+  };
+
+  function obsData() { return DATA.observe || null; }
+  function obsWin() {
+    const o = obsData();
+    return o ? o.by_window[obs.win] || null : null;
+  }
+  function winFrom() { const w = obsWin(); return w ? w.from : ''; }
+  function winLabel() { const w = obsWin(); return w ? w.label : '近1年'; }
+  function loadWinPref() {
+    const o = obsData();
+    if (!o) return;
+    let saved = null;
+    try { saved = localStorage.getItem('levels.window'); } catch (e) { /* */ }
+    obs.win = saved && o.by_window[saved] ? saved : o.default;
+  }
+
+  function guideColor(ln, hot) {
+    const a = hot ? 1 : 0.78;
+    return ln.kind === 'resistance' ? 'rgba(255,184,58,' + a + ')' : 'rgba(159,212,95,' + a + ')';
+  }
+  function swatch(group, kind) {
+    const st = GROUP_STYLE[group] || GROUP_STYLE.range;
+    const col = kind === 'resistance' ? '#ffb83a' : (kind === 'support' ? '#9fd45f' : '#c9bfa4');
+    return '<svg class="sw" width="22" height="8" aria-hidden="true"><line x1="0" y1="4" x2="22" y2="4" stroke="' + col +
+      '" stroke-width="' + (st.w + 0.5) + '"' + (st.dash ? ' stroke-dasharray="' + st.dash + '"' : '') + '/></svg>';
+  }
+  function winRange(w) {
+    const bars = (DATA.ohlcv || []).slice(-w.bars);
+    let lo = Infinity, hi = -Infinity;
+    bars.forEach(function (b) { if (b.low < lo) lo = b.low; if (b.high > hi) hi = b.high; });
+    return [lo, hi];
+  }
+  function inChart(ln, w, rg) {
+    return Math.abs(ln.dist_pct) <= AUTOSCALE_PCT || (ln.price >= rg[0] && ln.price <= rg[1]);
+  }
+
   function scheduleOverlay() {
     if (overlayRaf) cancelAnimationFrame(overlayRaf);
     overlayRaf = requestAnimationFrame(function () {
@@ -403,110 +396,266 @@
     const ctx = canvas.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    if (!filters.vrvp) return;
-    const st = DATA.state || {};
-    const vrvp = st.vrvp || {};
+    const win = obsWin();
+    if (!win) return;
+    const plotW = chart.timeScale().width() || w;
     const yOf = function (p) {
       try { return candleSeries.priceToCoordinate(p); } catch (e) { return null; }
     };
-    if (vrvp.val != null && vrvp.vah != null) {
-      const y1 = yOf(vrvp.vah);
-      const y2 = yOf(vrvp.val);
-      if (y1 != null && y2 != null) {
-        const top = Math.min(y1, y2);
-        const bot = Math.max(y1, y2);
-        ctx.fillStyle = 'rgba(232,168,56,0.08)';
-        ctx.fillRect(0, top, w, bot - top);
-        ctx.strokeStyle = 'rgba(232,168,56,0.28)';
+    function band(lo, hi, fill, stroke) {
+      const y1 = yOf(hi), y2 = yOf(lo);
+      if (y1 == null || y2 == null) return;
+      ctx.fillStyle = fill;
+      ctx.fillRect(0, Math.min(y1, y2), plotW, Math.abs(y2 - y1));
+      if (stroke) {
+        ctx.strokeStyle = stroke;
         ctx.lineWidth = 1;
-        ctx.setLineDash([4, 3]);
-        ctx.beginPath();
-        ctx.moveTo(0, top); ctx.lineTo(w, top);
-        ctx.moveTo(0, bot); ctx.lineTo(w, bot);
-        ctx.stroke();
-        ctx.setLineDash([]);
+        ctx.strokeRect(0.5, Math.min(y1, y2) + 0.5, plotW - 1, Math.abs(y2 - y1));
       }
     }
-    (DATA.levels || []).forEach(function (lv) {
-      const tag = classifyVrvpLevel(lv);
-      if (!tag || tag === 'poc' || tag === 'vah' || tag === 'val') return;
-      const y = yOf(lv.price);
-      if (y == null) return;
-      const bandH = 7;
-      if (tag === 'hvn') {
-        ctx.fillStyle = 'rgba(143,188,90,0.18)';
-        ctx.fillRect(0, y - bandH / 2, w, bandH);
-      } else if (tag === 'lvn') {
-        ctx.fillStyle = 'rgba(212,120,58,0.14)';
-        ctx.fillRect(0, y - bandH / 2, w, bandH);
-      }
+    win.zones.forEach(function (z, j) {
+      if (j === obs.hotZone) band(z.lo, z.hi, 'rgba(255,208,120,0.13)', 'rgba(255,208,120,0.55)');
+      else if (z.current) band(z.lo, z.hi, 'rgba(243,235,212,0.05)', null);
     });
-    const prof = getProfile();
-    if (!prof || !prof.max) return;
+    if (!filters.vrvp) return;
+    const prof = win.profile;
+    if (!prof) return;
+    if (prof.val != null && prof.vah != null) band(prof.val, prof.vah, 'rgba(232,168,56,0.06)', null);
     const profileW = Math.min(96, Math.max(56, w * 0.14));
-    const x0 = w - profileW - 4;
-    for (let i = 0; i < prof.bins; i++) {
+    const x0 = plotW - profileW - 2;
+    for (let i = 0; i < prof.vol.length; i++) {
       const pLo = prof.lo + i * prof.step;
       const pHi = pLo + prof.step;
-      const ya = yOf(pHi);
-      const yb = yOf(pLo);
+      const ya = yOf(pHi), yb = yOf(pLo);
       if (ya == null || yb == null) continue;
       const top = Math.min(ya, yb);
-      const bot = Math.max(ya, yb);
-      const bh = Math.max(1, bot - top);
-      const ratio = prof.vol[i] / prof.max;
-      const bw = ratio * (profileW - 4);
-      const inVA = (vrvp.val != null && vrvp.vah != null && pLo >= vrvp.val && pHi <= vrvp.vah);
-      ctx.fillStyle = inVA ? 'rgba(232,168,56,0.45)' : 'rgba(154,144,120,0.28)';
+      const bh = Math.max(1, Math.abs(yb - ya) - 1);
+      const bw = prof.vol[i] / 1000 * (profileW - 4);
+      const inVA = pLo >= prof.val - 1e-9 && pHi <= prof.vah + 1e-9;
+      ctx.fillStyle = inVA ? 'rgba(232,168,56,0.42)' : 'rgba(154,144,120,0.26)';
       ctx.fillRect(x0 + (profileW - 4 - bw), top, bw, bh);
     }
-    if (vrvp.poc != null) {
-      const yp = yOf(vrvp.poc);
-      if (yp != null) {
-        ctx.strokeStyle = 'rgba(232,168,56,0.95)';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(x0, yp);
-        ctx.lineTo(x0 + profileW - 2, yp);
-        ctx.stroke();
-      }
-    }
-    ctx.fillStyle = 'rgba(232,168,56,0.7)';
-    ctx.font = '9px IBM Plex Mono, SF Mono, Menlo, monospace';
-    ctx.textAlign = 'right';
-    ctx.fillText('VRVP', w - 6, 12);
   }
 
-  function clearPriceLines() {
+  function applyObsLines() {
     clearLines(candleSeries, priceLines);
+    const w = obsWin();
+    if (!w || !candleSeries) return;
+    w.lines.forEach(function (ln, i) {
+      const st = GROUP_STYLE[ln.group] || GROUP_STYLE.range;
+      const hot = i === obs.hot;
+      priceLines.push(candleSeries.createPriceLine({
+        price: ln.price, color: guideColor(ln, hot), lineWidth: st.w + (hot ? 2 : 0),
+        lineStyle: st.style, axisLabelVisible: true,
+      }));
+    });
   }
 
-  function applyPriceLines() {
-    if (!candleSeries) return;
-    applyLevelLines(candleSeries, priceLines, visibleLevels(filters), filters.vrvp);
-    renderLegend();
+  function lineNames(ln) {
+    return ln.members.map(function (m) { return m.name; }).join(' + ');
+  }
+
+  function footHint() {
+    const el = $('#levelLegend');
+    if (!el) return;
+    const w = obsWin();
+    if (!w) { el.innerHTML = ''; return; }
+    if (obs.hot >= 0 && w.lines[obs.hot]) {
+      const ln = w.lines[obs.hot];
+      const d = (obsData().defs || {})[ln.members[0].key] || {};
+      el.innerHTML = swatch(ln.group, ln.kind) + '<span class="px">' + ln.price.toFixed(2) + '</span> ' +
+        '<b>' + esc(lineNames(ln)) + '</b> <span class="' + (ln.kind === 'resistance' ? 'kind-res' : 'kind-sup') + '">' +
+        pctPts(ln.dist_pct, 1) + '</span> · ' + esc(d.what || '');
+      return;
+    }
+    if (obs.hotZone >= 0 && w.zones[obs.hotZone]) {
+      const z = w.zones[obs.hotZone];
+      const tags = obsData().zone_tags || {};
+      el.innerHTML = '区间 <span class="px">' + z.lo.toFixed(2) + '–' + z.hi.toFixed(2) + '</span> · ' +
+        (z.tags || []).map(function (t) { return esc((tags[t] || {}).label || t); }).join(' · ') +
+        ' · 宽 ' + z.width_pct.toFixed(1) + '%';
+      return;
+    }
+    el.innerHTML = '<span class="muted">鼠标移到线或区间上，这里显示它代表什么；右侧有完整说明</span>';
+  }
+
+  function setHot(line, zone) {
+    if (line === obs.hot && zone === obs.hotZone) return;
+    const w = obsWin();
+    const prev = obs.hot;
+    obs.hot = line;
+    obs.hotZone = zone;
+    [prev, line].forEach(function (i) {
+      if (i < 0 || !w || !w.lines[i] || !priceLines[i]) return;
+      const st = GROUP_STYLE[w.lines[i].group] || GROUP_STYLE.range;
+      priceLines[i].applyOptions({ color: guideColor(w.lines[i], i === line), lineWidth: st.w + (i === line ? 2 : 0) });
+    });
+    document.querySelectorAll('#guideList .gl, #guideList .gz').forEach(function (el) {
+      const li = el.getAttribute('data-li');
+      const zi = el.getAttribute('data-zi');
+      el.classList.toggle('hot', (li != null && Number(li) === line) || (zi != null && Number(zi) === zone));
+    });
+    footHint();
     scheduleOverlay();
   }
 
-  function renderLegend() {
-    const el = $('#levelLegend');
-    if (!el) return;
-    const parts = [];
-    if (filters.vrvp && DATA.state && DATA.state.vrvp) {
-      const v = DATA.state.vrvp;
-      parts.push('<span class="lg"><span class="sw va"></span>VA ' +
-        Number(v.val).toFixed(0) + '–' + Number(v.vah).toFixed(0) + '</span>');
-      parts.push('<span class="lg"><span class="sw poc"></span>POC ' + Number(v.poc).toFixed(1) + '</span>');
+  function statHtml(m, tr) {
+    const s = m.stat;
+    if (!s || !s.pool || s.pool.rate == null) return '';
+    const p = s.pool, base = s.base;
+    let vd = '', cls = '';
+    if (base != null && p.ci_lo != null) {
+      if (p.ci_lo > base) { vd = '比随机线可靠'; cls = 'ok'; }
+      else if (p.ci_hi < base) { vd = '不如随机线'; cls = 'bad'; }
+      else { vd = '和随机线差不多'; cls = 'meh'; }
     }
-    visibleLevels(filters).slice().sort(function (a, b) { return b.price - a.price; })
-      .forEach(function (lv) {
-        const k = lv.kind === 'resistance' ? 'res' : (lv.kind === 'support' ? 'sup' : 'anc');
-        const dist = (lv.dist_pct >= 0 ? '+' : '') + Number(lv.dist_pct).toFixed(1) + '%';
-        parts.push('<span class="lg"><span class="sw ' + k + '"></span>' +
-          '<span class="px">' + lv.price.toFixed(1) + '</span> ' +
-          KIND_LABEL[lv.kind] + ' ' + dist + '</span>');
+    return '<div class="gl-s"><span class="k">回测</span>碰到后 5 日内' + (s.side === 'support' ? '撑住' : '压住') +
+      ' <b>' + pct(p.rate) + '</b> <span class="muted">' + tr.n_symbols + '只×' + tr.years + '年 n=' + p.n +
+      (s.own && s.own.n >= 20 ? ' · 本股 ' + pct(s.own.rate) : '') + ' · 随机线 ' + pct(base) + '</span>' +
+      (vd ? ' <span class="vd ' + cls + '">' + vd + '</span>' : '') + '</div>';
+  }
+
+  function lineCard(ln, i, o, rg, w) {
+    const defs = o.defs || {};
+    const ms = ln.members;
+    const k = ln.kind === 'resistance' ? 'res' : 'sup';
+    const names = ms.map(function (m) { return esc(m.name); }).join('<i class="plus">＋</i>');
+    const dist = pctPts(ln.dist_pct, 1) + (ln.atr_dist != null ? ' · ' + Math.abs(ln.atr_dist).toFixed(1) + ' ATR' : '');
+    let body;
+    if (ms.length === 1) {
+      const d = defs[ms[0].key] || {};
+      body = '<div class="gl-w">' + esc(d.what) + '</div><div class="gl-u"><span class="k">怎么看</span>' + esc(d.use) + '</div>';
+    } else {
+      body = ms.map(function (m) {
+        return '<div class="gl-w"><b>' + esc(m.name) + '</b>：' + esc((defs[m.key] || {}).what) + '</div>';
+      }).join('') +
+        '<div class="gl-u"><span class="k">怎么看</span>' + esc((defs[ms[0].key] || {}).use) + '</div>' +
+        '<div class="gl-x">' + ms.length + ' 条线重合在同一价位（相差不到 0.4%），盯着这里的人更多。</div>';
+    }
+    const stats = ms.map(function (m) { return statHtml(m, o.training); }).join('');
+    return '<div class="gl ' + k + '" data-li="' + i + '">' +
+      '<div class="gl-h">' + swatch(ln.group, ln.kind) + '<b class="px">' + ln.price.toFixed(2) + '</b>' +
+      '<span class="nm">' + names + '</span>' +
+      '<span class="d ' + (k === 'res' ? 'kind-res' : 'kind-sup') + '">' + dist + '</span></div>' +
+      (inChart(ln, w, rg) ? '' : '<div class="gl-off">在图外：离现价太远，图上看不到这条线</div>') +
+      body + stats + '</div>';
+  }
+
+  function zoneCard(z, j, o, w) {
+    const zt = o.zone_tags || {};
+    const tags = (z.tags || []).map(function (t) {
+      const d = zt[t] || {};
+      let lab = d.label || t;
+      if ((t === 'dense' || t === 'thin') && z.density != null) lab += ' ' + z.density.toFixed(1) + '×';
+      return '<span class="tg ' + t + '" title="' + esc(d.text) + '">' + esc(lab) + '</span>';
+    }).join('');
+    const head = '<div class="gz-h"><span class="gz-w">↕ ' + z.width_pct.toFixed(1) + '%' +
+      (z.atr_w != null ? ' · ' + z.atr_w.toFixed(1) + ' ATR' : '') + '</span>' + tags +
+      '<span class="gz-d" title="窗口内收盘落在这个区间的天数">停留 ' + z.days_in + ' 天</span></div>';
+    if (!z.current) return '<div class="gz" data-zi="' + j + '">' + head + '</div>';
+    const up = w.lines[j], dn = w.lines[j + 1];
+    const text = (z.tags || []).map(function (t) { return esc((zt[t] || {}).text || ''); }).join('');
+    let ft = '';
+    const f = z.first_touch;
+    if (f) {
+      const reg = f.regime === 'up' ? '同样在 SMA200 上方' : (f.regime === 'down' ? '同样在 SMA200 下方' : '');
+      ft = '<div class="gz-ft"><span class="k">接下来 ' + f.days + ' 个交易日</span>先碰到上方线 <b class="kind-res">' + pct(f.up) +
+        '</b> · 先碰到下方线 <b class="kind-sup">' + pct(f.down) + '</b> · 都没碰到 ' + pct(f.none) +
+        '<div class="muted">按 ' + o.training.n_symbols + ' 只股票 ' + o.training.years + ' 年的真实走势统计：上方距离 ' +
+        f.up_atr.toFixed(1) + ' ATR、下方 ' + f.down_atr.toFixed(1) + ' ATR' + (reg ? '，只取' + reg + '的日子' : '') +
+        '（n=' + f.n + '）。只看距离，不含线本身的支撑/压力作用。</div></div>';
+    }
+    return '<div class="gz cur" data-zi="' + j + '">' + head +
+      '<div class="gz-now">▶ 现价 <b>' + w.close.toFixed(2) + '</b> 在这一段：上方是 ' + esc(up.members[0].name) +
+      '（' + pctPts(up.dist_pct, 1) + '），下方是 ' + esc(dn.members[0].name) + '（' + pctPts(dn.dist_pct, 1) + '）</div>' +
+      '<div class="gz-t">' + text + '</div>' + ft + '</div>';
+  }
+
+  function renderGuide() {
+    const o = obsData();
+    const list = $('#guideList');
+    if (!list) return;
+    const w = obsWin();
+    if (!o || !w) {
+      list.innerHTML = '<div class="muted" style="padding:10px 12px">没有观察数据</div>';
+      return;
+    }
+    const rg = winRange(w);
+    const tr = o.training || {};
+    $('#guideSub').textContent = w.label + '（' + w.from + ' 起）· 由高到低 ' + w.lines.length + ' 条线 · 统计用 ' +
+      tr.n_symbols + ' 只股票 × ' + tr.years + ' 年';
+    let html = '';
+    w.lines.forEach(function (ln, i) {
+      html += lineCard(ln, i, o, rg, w);
+      if (i < w.zones.length) html += zoneCard(w.zones[i], i, o, w);
+    });
+    list.innerHTML = html;
+    list.querySelectorAll('.gl').forEach(function (el) {
+      el.addEventListener('mouseenter', function () { setHot(Number(el.getAttribute('data-li')), -1); });
+      el.addEventListener('mouseleave', function () { setHot(-1, -1); });
+    });
+    list.querySelectorAll('.gz').forEach(function (el) {
+      el.addEventListener('mouseenter', function () { setHot(-1, Number(el.getAttribute('data-zi'))); });
+      el.addEventListener('mouseleave', function () { setHot(-1, -1); });
+    });
+    const used = {};
+    w.zones.forEach(function (z) { (z.tags || []).forEach(function (t) { used[t] = true; }); });
+    const zt = o.zone_tags || {};
+    $('#guideTags').innerHTML = '<div class="sec-l">区间标签是什么意思</div>' +
+      Object.keys(zt).filter(function (t) { return used[t]; }).map(function (t) {
+        return '<div class="tgdef"><span class="tg ' + t + '">' + esc(zt[t].label) + '</span>' + esc(zt[t].text) + '</div>';
+      }).join('');
+    $('#guideDef').innerHTML = '颜色：<span class="kind-res">橙 = 在现价上方（压力）</span>，<span class="kind-sup">绿 = 在现价下方（支撑）</span>。' +
+      'ATR = 近 14 日平均每天的波动幅度。<br>' + esc(tr.hold_def || '') + '<br>' + esc(tr.first_touch_def || '');
+    const key = $('#obsKey');
+    if (key) {
+      const groups = {};
+      w.lines.forEach(function (ln) { groups[ln.group] = true; });
+      key.innerHTML = Object.keys(GROUP_STYLE).filter(function (g) { return groups[g]; }).map(function (g) {
+        return '<span class="ky">' + swatch(g, null) + GROUP_STYLE[g].zh + '</span>';
+      }).join('');
+    }
+    const cur = list.querySelector('.gz.cur');
+    const rail = list.closest('.rail');
+    if (cur && rail) {
+      requestAnimationFrame(function () {
+        const dy = cur.getBoundingClientRect().top - rail.getBoundingClientRect().top;
+        rail.scrollTop = Math.max(0, rail.scrollTop + dy - rail.clientHeight * 0.3);
       });
-    el.innerHTML = parts.join('');
+    }
+    footHint();
+  }
+
+  function bindGuideCrosshair() {
+    chart.subscribeCrosshairMove(function (param) {
+      const w = obsWin();
+      if (!w || !param || !param.point) { setHot(-1, -1); return; }
+      const y = param.point.y;
+      let best = -1, bestD = 7;
+      w.lines.forEach(function (ln, i) {
+        const ly = candleSeries.priceToCoordinate(ln.price);
+        if (ly == null) return;
+        const d = Math.abs(ly - y);
+        if (d < bestD) { bestD = d; best = i; }
+      });
+      if (best >= 0) { setHot(best, -1); return; }
+      const p = candleSeries.coordinateToPrice(y);
+      let zone = -1;
+      if (p != null) w.zones.forEach(function (z, j) { if (p >= z.lo && p <= z.hi) zone = j; });
+      setHot(-1, zone);
+    });
+  }
+
+  function obsAutoscale(orig) {
+    const r = orig();
+    const w = obsWin();
+    if (!r || !r.priceRange || !w) return r;
+    w.lines.forEach(function (ln) {
+      if (Math.abs(ln.dist_pct) > AUTOSCALE_PCT) return;
+      r.priceRange.minValue = Math.min(r.priceRange.minValue, ln.price);
+      r.priceRange.maxValue = Math.max(r.priceRange.maxValue, ln.price);
+    });
+    return r;
   }
 
   function buildChart() {
@@ -514,20 +663,22 @@
     if (!el || typeof LightweightCharts === 'undefined') return;
     el.innerHTML = '';
     chart = LightweightCharts.createChart(el, chartTheme());
-    candleSeries = chart.addCandlestickSeries(candleOpts());
-    candleSeries.setData(candleData());
-    applyPriceLines();
+    candleSeries = chart.addCandlestickSeries(Object.assign(candleOpts(), { autoscaleInfoProvider: obsAutoscale }));
+    candleSeries.setData(candleData(nBars()));
+    applyObsLines();
     fitWithGutter(chart, nBars(), obsGutter());
     bindCrosshair(chart, candleSeries, '#crossBar');
+    bindGuideCrosshair();
     chart.timeScale().subscribeVisibleLogicalRangeChange(scheduleOverlay);
-    chart.subscribeCrosshairMove(scheduleOverlay);
     bindResize(chart, el);
   }
 
   const TAPE_GUTTER = 24;
 
   function nBars() {
-    return (DATA.ohlcv && DATA.ohlcv.length) || (DATA.price_series && DATA.price_series.length) || 0;
+    const all = (DATA.ohlcv && DATA.ohlcv.length) || (DATA.price_series && DATA.price_series.length) || 0;
+    const w = obsWin();
+    return w ? Math.min(all, w.bars) : all;
   }
 
   function obsGutter() {
@@ -567,46 +718,38 @@
     }
   }
 
-  function renderObsAccuracy() {
-    const bt = DATA.backtest || {};
-    const hold = bt.hold || {};
-    const br = bt.breakout || {};
-    const defs = bt.definitions || {};
-    const winEl = $('#accWindow');
-    if (winEl) winEl.textContent = windowLabel(defs);
-    const os = hold.overall_support || {};
-    const or_ = hold.overall_resistance || {};
-    $('#obsHoldKpi').innerHTML = [
-      cell('支撑', pct(os.hit_rate), holdSub(os, hold.baseline_support), barHtml(os.hit_rate, '')),
-      cell('压力', pct(or_.hit_rate), holdSub(or_, hold.baseline_resistance), barHtml(or_.hit_rate, 'res')),
-    ].join('');
-    const fam = hold.by_family || {};
-    // Rank by the lower confidence bound so tiny samples can't top the list.
-    const ranked = Object.keys(fam).map(function (k) { return fam[k]; })
-      .filter(function (f) { return f && f.n >= 10; })
-      .sort(function (a, b) { return (b.ci_lo || 0) - (a.ci_lo || 0); })
-      .slice(0, 6);
-    if (!ranked.length) {
-      $('#obsTopFamilies').innerHTML = '<div class="muted" style="padding:4px 12px;font-size:15px">样本不足（每族需 ≥10 次）</div>';
-    } else {
-      $('#obsTopFamilies').innerHTML = ranked.map(function (f) { return famHoldRow(f, hold); }).join('');
+  function syncWinButtons() {
+    document.querySelectorAll('[data-win]').forEach(function (btn) {
+      btn.classList.toggle('on', btn.getAttribute('data-win') === obs.win);
+    });
+  }
+
+  function setWin(key) {
+    const o = obsData();
+    if (!o || !o.by_window[key] || key === obs.win) return;
+    obs.win = key;
+    obs.hot = -1;
+    obs.hotZone = -1;
+    try { localStorage.setItem('levels.window', key); } catch (e) { /* */ }
+    syncWinButtons();
+    renderGuide();
+    renderHoldRail();
+    renderBreakRail();
+    if (chart) {
+      candleSeries.setData(candleData(nBars()));
+      applyObsLines();
+      fitWithGutter(chart, nBars(), obsGutter());
+      scheduleOverlay();
     }
-    const sum = br.summary || {};
-    const up = sum.up || {};
-    const dn = sum.down || {};
-    function bcell(dir, h) {
-      const s = (dir === 'up' ? up : dn)[h] || {};
-      return cell(
-        (dir === 'up' ? '↑' : '↓') + h + 'd 超额',
-        '<span class="' + clsRet(s.excess_mean) + '">' + pctPts(s.excess_mean, 2) + '</span>',
-        '均 ' + pctPts(s.mean, 2) + ' 胜' + pct(s.win_rate) + ' n=' + (s.n || 0),
-        barHtml(s.win_rate, dir === 'down' ? 'res' : '')
-      );
-    }
-    $('#obsBreakKpi').innerHTML = [
-      bcell('up', 1), bcell('up', 3), bcell('up', 5),
-      bcell('down', 1), bcell('down', 3), bcell('down', 5),
-    ].join('');
+    ['levels', 'hold', 'break'].forEach(function (k) {
+      const t = tapes[k];
+      if (!t.inited) return;
+      t.series.setData(candleData(nBars()));
+      if (k === 'levels') refreshLevelsChart();
+      if (k === 'hold') refreshHoldMarkers();
+      if (k === 'break') refreshBreakMarkers();
+      fitWithGutter(t.chart, nBars(), TAPE_GUTTER);
+    });
   }
 
   /* —— 点位 —— */
@@ -658,7 +801,7 @@
     el.innerHTML = '';
     const ch = LightweightCharts.createChart(el, chartTheme());
     const series = ch.addCandlestickSeries(candleOpts());
-    series.setData(candleData());
+    series.setData(candleData(nBars()));
     tapes.levels = { chart: ch, series: series, lines: [], inited: true };
     refreshLevelsChart();
     fitWithGutter(ch, nBars(), TAPE_GUTTER);
@@ -671,7 +814,9 @@
   /* —— 触及 —— */
   function holdEventsFiltered() {
     const ev = ((DATA.backtest || {}).hold || {}).events || [];
+    const from = winFrom();
     return ev.filter(function (e) {
+      if (from && e.date < from) return false;
       if (holdFilters.side !== 'all' && e.side !== holdFilters.side) return false;
       if (holdFilters.out === 'held' && !e.held) return false;
       if (holdFilters.out === 'broken' && e.held) return false;
@@ -763,7 +908,7 @@
     el.innerHTML = '';
     const ch = LightweightCharts.createChart(el, chartTheme());
     const series = ch.addCandlestickSeries(candleOpts());
-    series.setData(candleData());
+    series.setData(candleData(nBars()));
     tapes.hold = { chart: ch, series: series, lines: [], inited: true };
     refreshHoldMarkers();
     fitWithGutter(ch, nBars(), TAPE_GUTTER);
@@ -780,7 +925,9 @@
     if (!ev.length) {
       ev = [].concat(br.examples_up || [], br.examples_down || []);
     }
+    const from = winFrom();
     return ev.filter(function (e) {
+      if (from && e.date < from) return false;
       if (brkFilters.dir !== 'all' && e.dir !== brkFilters.dir) return false;
       return true;
     });
@@ -918,7 +1065,7 @@
     el.innerHTML = '';
     const ch = LightweightCharts.createChart(el, chartTheme());
     const series = ch.addCandlestickSeries(candleOpts());
-    series.setData(candleData());
+    series.setData(candleData(nBars()));
     tapes.break = { chart: ch, series: series, lines: [], inited: true };
     refreshBreakMarkers();
     fitWithGutter(ch, nBars(), TAPE_GUTTER);
@@ -1636,13 +1783,6 @@
 
   /* —— filters / views —— */
   function syncPresetButtons() {
-    document.querySelectorAll('[data-preset]').forEach(function (btn) {
-      btn.classList.toggle('on', btn.getAttribute('data-preset') === filters.preset);
-    });
-    document.querySelectorAll('[data-kind]').forEach(function (btn) {
-      const k = btn.getAttribute('data-kind');
-      btn.classList.toggle('on', !!filters.kinds[k]);
-    });
     const vbtn = $('#btnVrvp');
     if (vbtn) vbtn.classList.toggle('on', !!filters.vrvp);
 
@@ -1666,27 +1806,11 @@
   }
 
   function bindFilters() {
-    document.querySelectorAll('[data-preset]').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        filters.preset = btn.getAttribute('data-preset');
-        syncPresetButtons();
-        applyPriceLines();
-      });
-    });
-    document.querySelectorAll('[data-kind]').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        const k = btn.getAttribute('data-kind');
-        filters.kinds[k] = !filters.kinds[k];
-        syncPresetButtons();
-        applyPriceLines();
-      });
-    });
     const vbtn = $('#btnVrvp');
     if (vbtn) {
       vbtn.addEventListener('click', function () {
         filters.vrvp = !filters.vrvp;
         syncPresetButtons();
-        applyPriceLines();
         if (chart) fitWithGutter(chart, nBars(), obsGutter());
         scheduleOverlay();
       });
@@ -1736,6 +1860,9 @@
         refreshBreakMarkers();
       });
     });
+    document.querySelectorAll('[data-win]').forEach(function (btn) {
+      btn.addEventListener('click', function () { setWin(btn.getAttribute('data-win')); });
+    });
   }
 
   function switchView(id) {
@@ -1753,6 +1880,8 @@
       stamp.textContent = ({ signal: '信号', observe: '观察', levels: '点位', hold: '触及', break: '突破', playback: '回测' })[id] || id;
     }
     if (history.replaceState) history.replaceState(null, '', location.search + '#' + id);
+    const ws = $('#winSwitch');
+    if (ws) ws.hidden = !obsData() || ['observe', 'levels', 'hold', 'break'].indexOf(id) < 0;
     if (id !== 'playback') stopPlayback();
     if (id === 'signal') {
       initSignalChart();
@@ -1790,12 +1919,13 @@
       $('#app').innerHTML = '<div style="padding:20px;font-family:IBM Plex Mono,SF Mono,Menlo,monospace;background:#1e2118;color:#e6dcc4">无法加载 data.json：' + esc(e.message) + '</div>';
       return;
     }
-    profileCache = null;
     renderHeader();
     loadPrefs();
     renderSignalRail();
     renderSigMetrics();
-    renderObsAccuracy();
+    loadWinPref();
+    syncWinButtons();
+    renderGuide();
     renderLevelsLadder();
     renderHoldRail();
     renderBreakRail();

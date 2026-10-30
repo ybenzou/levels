@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#0c0e09" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>Levels · AVGO</title>
-  <link rel="stylesheet" href="./styles.css?v=20261030154000" />
+  <link rel="stylesheet" href="./styles.css?v=20261030170000" />
   <script src="https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -38,6 +38,12 @@
       <button type="button" class="tab" data-view="hold">触及</button>
       <button type="button" class="tab" data-view="break">突破</button>
       <button type="button" class="tab" data-view="playback">回测</button>
+      <div class="win-switch" id="winSwitch" role="group" aria-label="观察窗口" hidden>
+        <span class="tool-l">窗口</span>
+        <button type="button" class="tog" data-win="1m">1月</button>
+        <button type="button" class="tog" data-win="2m">2月</button>
+        <button type="button" class="tog on" data-win="3m">3月</button>
+      </div>
     </nav>
 
     <section class="view on" id="view-signal" aria-label="信号">
@@ -105,16 +111,10 @@
       <div class="obs">
         <div class="chart-pane">
           <div class="tool">
-            <div class="toggles" id="presetToggles" role="group" aria-label="筛选">
-              <button type="button" class="tog" data-preset="all">全部</button>
-              <button type="button" class="tog on" data-preset="priority">优先</button>
-              <button type="button" class="tog" data-preset="near5">±5%</button>
+            <div class="toggles" role="group" aria-label="叠加">
+              <span class="obs-key" id="obsKey"></span>
               <span class="sep"></span>
-              <button type="button" class="tog on res" data-kind="resistance">压力</button>
-              <button type="button" class="tog on sup" data-kind="support">支撑</button>
-              <button type="button" class="tog on anc" data-kind="anchor">锚点</button>
-              <span class="sep"></span>
-              <button type="button" class="tog on" data-vrvp="1" id="btnVrvp" title="价值区 / 成交量剖面">VRVP</button>
+              <button type="button" class="tog on" data-vrvp="1" id="btnVrvp" title="窗口内的成交量剖面与价值区">VRVP</button>
             </div>
             <button type="button" class="tog ghost" id="btnFit">适配</button>
           </div>
@@ -127,20 +127,11 @@
             <div class="legend" id="levelLegend"></div>
           </div>
         </div>
-        <aside class="rail" aria-label="准确率">
-          <div class="rail-h">准确率 <span id="accWindow" class="rail-sub"></span></div>
-          <div class="rail-sec">
-            <div class="sec-l">触及守住</div>
-            <div id="obsHoldKpi" class="kpi-strip"></div>
-          </div>
-          <div class="rail-sec">
-            <div class="sec-l">命中靠前</div>
-            <div id="obsTopFamilies"></div>
-          </div>
-          <div class="rail-sec">
-            <div class="sec-l">突破收益</div>
-            <div id="obsBreakKpi" class="kpi-grid"></div>
-          </div>
+        <aside class="rail guide-rail" aria-label="线与区间">
+          <div class="rail-h">线与区间 <span id="guideSub" class="rail-sub"></span></div>
+          <div id="guideList" class="guide"></div>
+          <div class="rail-sec guide-tags" id="guideTags"></div>
+          <div class="rail-def" id="guideDef"></div>
         </aside>
       </div>
     </section>
@@ -308,6 +299,6 @@
     </section>
 
   </div>
-  <script src="./app.js?v=20261030154000"></script>
+  <script src="./app.js?v=20261030170000"></script>
 </body>
 </html>

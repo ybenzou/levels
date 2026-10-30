@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, os.path.dirname(__file__))
 import events  # noqa: E402
 import model as M  # noqa: E402
+import observe  # noqa: E402
 from config import DISPLAY_BARS, PROXY, TARGETS, UNIVERSE  # noqa: E402
 from fetch import fetch_daily  # noqa: E402
 from indicators import compute_all  # noqa: E402
@@ -69,7 +70,7 @@ def pooled_validation(uni, panel, th):
             "sizing": sizing, "tilt": tilt, "verdict": verdict}
 
 
-def build_symbol(sym, uni, panel, th, validation, generated_at, meta):
+def build_symbol(sym, uni, panel, th, validation, generated_at, meta, pooled_hold, ft_cache):
     bars, ind = uni[sym]
     levels, vp, window = compute_levels(bars, ind, DISPLAY_BARS)
     disp = bars[-DISPLAY_BARS:]
@@ -112,6 +113,7 @@ def build_symbol(sym, uni, panel, th, validation, generated_at, meta):
                    "low": round(b["low"], 2), "close": round(b["close"], 2), "volume": b["volume"]} for b in disp],
         "price_series": [{"date": b["date"], "close": round(b["close"], 2)} for b in disp],
         "backtest": bt,
+        "observe": observe.build(bars, ind, bt, pooled_hold, uni, ft_cache),
         "model": mdl,
     }
 
@@ -137,12 +139,15 @@ def main():
     panel = M.build_panel(uni)
     th = M.score_thresholds(panel)
     validation = pooled_validation(uni, panel, th)
+    pooled_hold = observe.pooled_hold_stats([events.run(b, ind, b[-1]["date"]) for b, ind in uni.values()],
+                                            round(max(len(b) for b, _ in uni.values()) / 252))
+    ft_cache = {}
     generated_at = datetime.now(HKT).replace(microsecond=0).isoformat()
 
     os.makedirs(os.path.join(ROOT, "data"), exist_ok=True)
     index = {"generated_at": generated_at, "symbols": [], "validation": validation}
     for sym in TARGETS:
-        out = build_symbol(sym, uni, panel, th, validation, generated_at, meta)
+        out = build_symbol(sym, uni, panel, th, validation, generated_at, meta, pooled_hold, ft_cache)
         _dump(out, os.path.join(ROOT, "data", f"{sym}.json"))
         card = out["model"]["card"]
         index["symbols"].append({"symbol": sym, "name": out["name"], "as_of": out["as_of"], "last_close": out["last_close"],
