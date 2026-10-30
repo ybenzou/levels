@@ -588,50 +588,24 @@ def history(m, bars, ind, nb):
             "score_from": S.d[max(t0, nb + 1)] if max(t0, nb + 1) < n else None}
 
 
-def live_view(m, pbars, pind, nb, levels, live):
-    """Read the close-based lines against a live / pre-market price. pbars ends with a provisional bar
-    built from today's trades; it is used only to re-estimate the 10-day reach at the new distance."""
-    S = Sym(pbars, pind)
-    t = len(pbars) - 1
-    a = S.a[t]
-    px = live["price"]
-    if not a or not levels:
+def realtime_inputs(bars, ind, nb):
+    """What the browser needs to recompute the reach context at a live price (the live trade is bar n)."""
+    n = len(bars)
+    c, s20 = ind["close"], ind["sma20"]
+    if n < max(nb, 50) + 1 or not ind["atr14"][-1]:
         return None
-    _, wh, wl = candidates(S, t, nb)
-    rows = []
-    for lv in levels:
-        P = lv["price"]
-        x = features(S, t, nb, P, wh, wl)
-        rows.append({"lv": lv, "x": x, "side": "support" if P < px else "resistance"})
-    for side in SIDES:
-        same = sorted((r for r in rows if r["side"] == side), key=lambda r: abs(r["lv"]["price"] - px))
-        for i, r in enumerate(same):
-            r["rank"] = i + 1
-    var, mdl = m["prod"]["reach"]
-    out = []
-    for r in rows:
-        lv, x = r["lv"], r["x"]
-        P, a0 = lv["price"], (lv["hi"] - lv["lo"]) / (2 * TOL)
-        sup = lv["kind"] == "support"
-        if sup:
-            status = "beyond" if px < lv["fail"] else ("through" if px < P else ("touched" if live["low"] <= P + TOUCH * a0 else "ahead"))
-        else:
-            status = "beyond" if px > lv["fail"] else ("through" if px > P else ("touched" if live["high"] >= P - TOUCH * a0 else "ahead"))
-        q = {"side": r["side"], "ctx": ctx(x), "full": _full(x, r["rank"], lv["score"], nb, a, px)}
-        out.append({"price": P, "kind": lv["kind"], "side_now": r["side"], "status": status,
-                    "dist_pct": round((P / px - 1) * 100, 2), "atr_dist": round((P - px) / a0, 2),
-                    "reach": round(_pred(var, mdl, q), 3) if status == "ahead" else None})
-    above = [o for o in out if o["price"] > px]
-    below = [o for o in out if o["price"] < px]
-    return {"levels": out,
-            "up": min(above, key=lambda o: o["price"])["price"] if above else None,
-            "down": max(below, key=lambda o: o["price"])["price"] if below else None}
+    return {"a": round(ind["atr14"][-1], 4), "sum19": round(sum(c[-19:]), 4), "sum49": round(sum(c[-49:]), 4),
+            "s20_m5": round(s20[n - 5], 4) if s20[n - 5] else None,
+            "wh0": round(max(ind["high"][n - nb + 1:]), 4), "wl0": round(min(ind["low"][n - nb + 1:]), 4)}
 
 
 def model_card(m):
     return {
         "n": m["n"], "oos": m["oos"], "by_rank": m["by_rank"], "years": m["years"], "n_symbols": m["n_symbols"],
         "outcomes": [{"key": y, "label": lab} for y, lab in OUTCOMES],
+        "reach_model": ({"w": m["prod"]["reach"][1]["w"], "mu": m["prod"]["reach"][1]["mu"], "sd": m["prod"]["reach"][1]["sd"]}
+                        if m["prod"]["reach"][0] == "ctx" else None),
+        "touch_atr": TOUCH, "max_dist": MAX_DIST,
         "reach_days": REACH_DAYS, "react_days": REACT_DAYS, "follow_days": FOLLOW_DAYS,
         "win_atr": WIN_ATR, "fail_atr": FAIL_ATR, "follow_atr": FOLLOW_ATR, "split": SPLIT,
         "def": (f"画线：窗口内的局部高/低点（左右各 {PIVOT_K} 根 K 线）相差 {TOL:g} ATR 以内归为同一个价位，"
