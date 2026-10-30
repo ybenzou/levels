@@ -76,60 +76,105 @@
       </div>
     </section>
 
-    <section class="view" id="view-levels" hidden>
-      <div class="viz-shell">
-        <div class="viz-row">
-          <div class="viz-pane grow">
-            <div class="block-h tight">价位阶梯</div>
-            <div id="levelsLadder" class="ladder"></div>
+    <section class="view" id="view-levels" hidden aria-label="点位">
+      <div class="obs">
+        <div class="chart-pane">
+          <div class="tool">
+            <div class="toggles" role="group" aria-label="点位筛选">
+              <button type="button" class="tog" data-lv-preset="all">全部</button>
+              <button type="button" class="tog on" data-lv-preset="priority">优先</button>
+              <button type="button" class="tog" data-lv-preset="near5">±5%</button>
+              <span class="sep"></span>
+              <button type="button" class="tog on res" data-lv-kind="resistance">压力</button>
+              <button type="button" class="tog on sup" data-lv-kind="support">支撑</button>
+              <button type="button" class="tog on anc" data-lv-kind="anchor">锚点</button>
+            </div>
+            <button type="button" class="tog ghost" id="btnFitLevels">适配</button>
           </div>
-          <div class="viz-pane profile-pane">
-            <div class="block-h tight">VRVP 分层</div>
-            <canvas id="levelsProfile" width="160" height="420"></canvas>
-            <div class="profile-meta" id="levelsProfileMeta"></div>
+          <div class="chart-stack">
+            <div id="chartLevels" role="img" aria-label="点位叠K线"></div>
+          </div>
+          <div class="chart-foot">
+            <div class="ohlc" id="crossLevels">十字线 · OHLC</div>
+            <div class="legend" id="levelsLegend"></div>
           </div>
         </div>
-        <div class="viz-row bands-row">
-          <div class="viz-pane grow">
-            <div class="block-h tight">关键带</div>
-            <div id="bandsViz" class="bands-viz"></div>
-          </div>
-        </div>
+        <aside class="rail" aria-label="价位">
+          <div class="rail-h">价位阶梯</div>
+          <div id="levelsLadder" class="ladder compact"></div>
+        </aside>
       </div>
     </section>
 
-    <section class="view" id="view-hold" hidden>
-      <div class="viz-shell">
-        <div class="kpi-strip wide" id="holdKpi"></div>
-        <div class="viz-row split">
-          <div class="viz-pane grow">
-            <div class="block-h tight">分族守住率</div>
-            <div id="holdChart" class="hbar-chart"></div>
+    <section class="view" id="view-hold" hidden aria-label="触及">
+      <div class="obs">
+        <div class="chart-pane">
+          <div class="tool">
+            <div class="toggles" role="group" aria-label="触及筛选">
+              <button type="button" class="tog on" data-hold-side="all">全部</button>
+              <button type="button" class="tog sup" data-hold-side="support">支撑</button>
+              <button type="button" class="tog res" data-hold-side="resistance">压力</button>
+              <span class="sep"></span>
+              <button type="button" class="tog on" data-hold-out="all">全结果</button>
+              <button type="button" class="tog" data-hold-out="held">守住</button>
+              <button type="button" class="tog" data-hold-out="broken">跌破</button>
+            </div>
+            <button type="button" class="tog ghost" id="btnFitHold">适配</button>
           </div>
-          <div class="viz-pane side">
-            <div class="block-h tight">定义</div>
-            <p class="def tight" id="holdDef"></p>
-            <div id="holdSideSplit" class="side-split"></div>
+          <div class="chart-stack">
+            <div id="chartHold" role="img" aria-label="触及事件叠K线"></div>
+          </div>
+          <div class="chart-foot">
+            <div class="ohlc" id="crossHold">标记 · 触及事件</div>
+            <div class="legend tight" id="holdLegend">
+              <span class="lg"><span class="sw sup"></span>守住</span>
+              <span class="lg"><span class="sw res"></span>跌破</span>
+            </div>
           </div>
         </div>
+        <aside class="rail" aria-label="触及回测">
+          <div class="rail-h">触及守住 <span id="holdWin" class="rail-sub"></span></div>
+          <div class="kpi-strip" id="holdKpi"></div>
+          <div class="rail-sec grow">
+            <div class="sec-l">分族</div>
+            <div id="holdChart" class="fam-list"></div>
+          </div>
+          <p class="def tight rail-def" id="holdDef"></p>
+        </aside>
       </div>
     </section>
 
-    <section class="view" id="view-break" hidden>
-      <div class="viz-shell">
-        <div class="block-h tight">突破后收益分布</div>
-        <div id="breakHorizon" class="horizon-grid"></div>
-        <div class="viz-row split">
-          <div class="viz-pane grow">
-            <div class="block-h tight">分族 +5d 中位 · 四分位</div>
-            <div id="breakChart" class="forest-chart"></div>
+    <section class="view" id="view-break" hidden aria-label="突破">
+      <div class="obs">
+        <div class="chart-pane">
+          <div class="tool">
+            <div class="toggles" role="group" aria-label="突破筛选">
+              <button type="button" class="tog on" data-brk-dir="all">全部</button>
+              <button type="button" class="tog" data-brk-dir="up">↑向上</button>
+              <button type="button" class="tog" data-brk-dir="down">↓向下</button>
+            </div>
+            <button type="button" class="tog ghost" id="btnFitBreak">适配</button>
           </div>
-          <div class="viz-pane side">
-            <div class="block-h tight">定义</div>
-            <p class="def tight" id="breakDef"></p>
-            <div id="breakKpi" class="kpi-grid compact"></div>
+          <div class="chart-stack">
+            <div id="chartBreak" role="img" aria-label="突破事件叠K线"></div>
+          </div>
+          <div class="chart-foot">
+            <div class="ohlc" id="crossBreak">标记 · 突破事件</div>
+            <div class="legend tight" id="breakLegend">
+              <span class="lg"><span class="sw anc"></span>↑突破</span>
+              <span class="lg"><span class="sw res"></span>↓跌破</span>
+            </div>
           </div>
         </div>
+        <aside class="rail" aria-label="突破回测">
+          <div class="rail-h">突破收益 <span id="breakWin" class="rail-sub"></span></div>
+          <div id="breakHorizon" class="horizon-grid compact"></div>
+          <div class="rail-sec grow">
+            <div class="sec-l">分族 +5d</div>
+            <div id="breakChart" class="fam-list"></div>
+          </div>
+          <p class="def tight rail-def" id="breakDef"></p>
+        </aside>
       </div>
     </section>
   </div>

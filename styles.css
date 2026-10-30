@@ -189,8 +189,7 @@ body::after {
 #view-levels.view.on,
 #view-hold.view.on,
 #view-break.view.on {
-  overflow: auto;
-  -webkit-overflow-scrolling: touch;
+  overflow: hidden;
 }
 
 .obs {
@@ -271,7 +270,7 @@ body::after {
   position: relative;
   width: 100%;
 }
-#chart {
+#chart, #chartLevels, #chartHold, #chartBreak {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -898,3 +897,73 @@ body::after {
   .hb .n { display: none; }
   body::before { opacity: 0.04; }
 }
+
+/* —— Shared tape charts in 点位/触及/突破 —— */
+.ladder.compact {
+  max-height: none;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 0 8px;
+}
+.ladder.compact .lad {
+  grid-template-columns: 58px 44px 28px 1fr;
+  font-size: 10px;
+  padding: 3px 10px;
+}
+.ladder.compact .lad .mark { display: none; }
+.ladder.compact .lad .track { height: 5px; }
+.fam-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: auto;
+  max-height: none;
+  flex: 1 1 0;
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
+}
+.fam-list .fam,
+.fam-list .hb {
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.rail-def {
+  padding: 8px 12px 12px;
+  border-top: 1px solid var(--hair);
+  margin: 0 !important;
+  flex-shrink: 0;
+  color: var(--dim);
+  font-size: 9px !important;
+  line-height: 1.4;
+}
+.horizon-grid.compact {
+  grid-template-columns: repeat(2, 1fr);
+  border-bottom: 1px solid var(--hair);
+}
+.horizon-grid.compact .hz {
+  padding: 6px 8px;
+}
+.horizon-grid.compact .hz:nth-child(2n) { border-right: 0; }
+.horizon-grid.compact .hz:nth-child(n+3) { border-top: 1px solid var(--hair); }
+.legend.tight { gap: 10px; }
+.event-line {
+  font-size: 10px;
+  color: var(--muted);
+  padding: 2px 0;
+}
+
+.rail-sec.grow {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.rail-sec.grow .fam-list {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.rail > .kpi-strip { flex-shrink: 0; }
+.rail > .horizon-grid { flex-shrink: 0; }

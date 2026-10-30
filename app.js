@@ -1,4 +1,4 @@
-/* AVGO levels — Swiss observation + VRVP + chart tabs */
+/* AVGO levels — cassette tape · K-line on every tab */
 (function () {
   'use strict';
 
@@ -10,13 +10,28 @@
     preset: 'priority',
     vrvp: true,
   };
+  const lvFilters = {
+    kinds: { resistance: true, support: true, anchor: true },
+    preset: 'priority',
+  };
+  const holdFilters = { side: 'all', out: 'all' };
+  const brkFilters = { dir: 'all' };
 
   let DATA = null;
+  let profileCache = null;
+  let overlayRaf = 0;
+
+  /* observe chart */
   let chart = null;
   let candleSeries = null;
   let priceLines = [];
-  let profileCache = null;
-  let overlayRaf = 0;
+
+  /* satellite charts */
+  const tapes = {
+    levels: { chart: null, series: null, lines: [], inited: false },
+    hold: { chart: null, series: null, lines: [], inited: false },
+    break: { chart: null, series: null, lines: [], inited: false },
+  };
 
   function $(sel) { return document.querySelector(sel); }
   function pct(x, d) {
@@ -50,6 +65,9 @@
       val + '</div>' + (sub ? '<div class="sub">' + esc(sub) + '</div>' : '') +
       (bar || '') + '</div>';
   }
+  function PRI_LABEL(p) {
+    return ({ 0: '现价', 1: '高优', 2: '中', 3: '低' })[p] || String(p);
+  }
 
   async function loadData() {
     try {
@@ -65,14 +83,14 @@
     }
   }
 
-  function levelPasses(lv) {
-    if (!filters.kinds[lv.kind]) return false;
-    if (filters.preset === 'priority') return lv.priority <= 1;
-    if (filters.preset === 'near5') return Math.abs(Number(lv.dist_pct)) <= 5;
+  function levelPasses(lv, f) {
+    if (!f.kinds[lv.kind]) return false;
+    if (f.preset === 'priority') return lv.priority <= 1;
+    if (f.preset === 'near5') return Math.abs(Number(lv.dist_pct)) <= 5;
     return true;
   }
-  function visibleLevels() {
-    return (DATA.levels || []).filter(levelPasses);
+  function visibleLevels(f) {
+    return (DATA.levels || []).filter(function (lv) { return levelPasses(lv, f || filters); });
   }
 
   function classifyVrvpLevel(lv) {
@@ -110,7 +128,6 @@
       if (vol[i] > max) { max = vol[i]; pocIdx = i; }
     }
     const total = Array.prototype.reduce.call(vol, function (a, b) { return a + b; }, 0);
-    // 70% value area around POC
     let covered = vol[pocIdx];
     let L = pocIdx, R = pocIdx;
     const target = total * 0.7;
@@ -128,11 +145,145 @@
       total: total,
     };
   }
-
   function getProfile() {
     if (profileCache) return profileCache;
     profileCache = computeVolumeProfile(DATA.ohlcv, 48);
     return profileCache;
+  }
+
+  function candleData() {
+    if (DATA.ohlcv && DATA.ohlcv.length) {
+      return DATA.ohlcv.map(function (b) {
+        return { time: toUnix(b.date), open: b.open, high: b.high, low: b.low, close: b.close };
+      });
+    }
+    if (DATA.price_series && DATA.price_series.length) {
+      return DATA.price_series.map(function (b) {
+        const c = b.close;
+        return { time: toUnix(b.date), open: c, high: c, low: c, close: c };
+      });
+    }
+    return [];
+  }
+
+  function chartTheme() {
+    return {
+      layout: {
+        background: { type: 'solid', color: '#12140e' },
+        textColor: '#9a9078',
+        fontSize: 11,
+        fontFamily: '"IBM Plex Mono", "SF Mono", Menlo, Consolas, monospace',
+      },
+      grid: {
+        vertLines: { color: '#2a2e22' },
+        horzLines: { color: '#2a2e22' },
+      },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      rightPriceScale: { borderColor: '#4e5240', scaleMargins: { top: 0.04, bottom: 0.08 } },
+      timeScale: { borderColor: '#4e5240', timeVisible: false, rightOffset: 4 },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+      handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
+    };
+  }
+
+  function candleOpts() {
+    return {
+      upColor: '#8fbc5a',
+      downColor: '#d4783a',
+      borderUpColor: '#8fbc5a',
+      borderDownColor: '#d4783a',
+      wickUpColor: '#8fbc5a',
+      wickDownColor: '#d4783a',
+    };
+  }
+
+  function lineColor(kind, priority) {
+    if (kind === 'resistance') return priority <= 1 ? 'rgba(212,120,58,0.95)' : 'rgba(212,120,58,0.45)';
+    if (kind === 'support') return priority <= 1 ? 'rgba(143,188,90,0.95)' : 'rgba(143,188,90,0.4)';
+    return 'rgba(232,168,56,0.85)';
+  }
+
+  function bindCrosshair(ch, series, elId) {
+    ch.subscribeCrosshairMove(function (param) {
+      const bar = $(elId);
+      if (!bar) return;
+      if (!param || !param.time || !param.seriesData) {
+        bar.textContent = '十字线 · OHLC';
+        return;
+      }
+      const d = param.seriesData.get(series);
+      if (!d) { bar.textContent = '—'; return; }
+      const t = param.time;
+      let dateStr = '';
+      if (typeof t === 'number') {
+        dateStr = new Date(t * 1000).toISOString().slice(0, 10);
+      } else if (t && t.year) {
+        dateStr = t.year + '-' + String(t.month).padStart(2, '0') + '-' + String(t.day).padStart(2, '0');
+      }
+      bar.innerHTML = '<strong>' + esc(dateStr) + '</strong>  O ' + d.open.toFixed(2) +
+        '  H ' + d.high.toFixed(2) + '  L ' + d.low.toFixed(2) +
+        '  C <strong>' + d.close.toFixed(2) + '</strong>';
+    });
+  }
+
+  function bindResize(ch, el) {
+    function sync() {
+      if (!ch || !el) return;
+      const stack = el.parentElement;
+      const w = stack ? stack.clientWidth : el.clientWidth;
+      const h = stack ? stack.clientHeight : el.clientHeight;
+      if (w > 0 && h > 0) ch.applyOptions({ width: w, height: h });
+    }
+    const ro = new ResizeObserver(sync);
+    const stack = el.closest('.chart-stack') || el;
+    ro.observe(stack);
+    const pane = el.closest('.chart-pane');
+    if (pane) ro.observe(pane);
+    const obs = el.closest('.obs');
+    if (obs) ro.observe(obs);
+    window.addEventListener('resize', sync);
+    requestAnimationFrame(function () { requestAnimationFrame(sync); });
+    sync();
+    return sync;
+  }
+
+  function clearLines(series, arr) {
+    if (!series) return;
+    arr.forEach(function (pl) {
+      try { series.removePriceLine(pl); } catch (e) { /* */ }
+    });
+    arr.length = 0;
+  }
+
+  function applyLevelLines(series, linesArr, levels, withVrvp) {
+    clearLines(series, linesArr);
+    if (!series) return;
+    levels.forEach(function (lv) {
+      const pl = series.createPriceLine({
+        price: lv.price,
+        color: lineColor(lv.kind, lv.priority),
+        lineWidth: lv.priority <= 1 || lv.kind === 'anchor' ? 2 : 1,
+        lineStyle: lv.kind === 'anchor' ? LightweightCharts.LineStyle.Dashed :
+          (lv.priority <= 1 ? LightweightCharts.LineStyle.Solid : LightweightCharts.LineStyle.Dashed),
+        axisLabelVisible: lv.priority <= 1 || lv.kind === 'anchor',
+        title: KIND_LABEL[lv.kind] + ' ' + lv.price,
+      });
+      linesArr.push(pl);
+    });
+    if (withVrvp && DATA.state && DATA.state.vrvp) {
+      const v = DATA.state.vrvp;
+      [
+        { price: v.poc, color: 'rgba(232,168,56,0.95)', w: 2, title: 'POC', style: LightweightCharts.LineStyle.Solid },
+        { price: v.vah, color: 'rgba(230,220,196,0.45)', w: 1, title: 'VAH', style: LightweightCharts.LineStyle.Dashed },
+        { price: v.val, color: 'rgba(230,220,196,0.45)', w: 1, title: 'VAL', style: LightweightCharts.LineStyle.Dashed },
+      ].forEach(function (cfg) {
+        if (cfg.price == null) return;
+        linesArr.push(series.createPriceLine({
+          price: cfg.price, color: cfg.color, lineWidth: cfg.w,
+          lineStyle: cfg.style, axisLabelVisible: true, title: cfg.title,
+        }));
+      });
+    }
   }
 
   function renderHeader() {
@@ -142,80 +293,7 @@
       close + '</strong>';
   }
 
-  function lineColor(kind, priority) {
-    if (kind === 'resistance') return priority <= 1 ? 'rgba(212,120,58,0.95)' : 'rgba(212,120,58,0.45)';
-    if (kind === 'support') return priority <= 1 ? 'rgba(143,188,90,0.95)' : 'rgba(143,188,90,0.4)';
-    return 'rgba(232,168,56,0.85)';
-  }
-
-  function clearPriceLines() {
-    if (!candleSeries) return;
-    priceLines.forEach(function (pl) {
-      try { candleSeries.removePriceLine(pl); } catch (e) { /* */ }
-    });
-    priceLines = [];
-  }
-
-  function applyPriceLines() {
-    if (!candleSeries) return;
-    clearPriceLines();
-    visibleLevels().forEach(function (lv) {
-      const pl = candleSeries.createPriceLine({
-        price: lv.price,
-        color: lineColor(lv.kind, lv.priority),
-        lineWidth: lv.priority <= 1 || lv.kind === 'anchor' ? 2 : 1,
-        lineStyle: lv.kind === 'anchor' ? LightweightCharts.LineStyle.Dashed :
-          (lv.priority <= 1 ? LightweightCharts.LineStyle.Solid : LightweightCharts.LineStyle.Dashed),
-        axisLabelVisible: lv.priority <= 1 || lv.kind === 'anchor',
-        title: KIND_LABEL[lv.kind] + ' ' + lv.price,
-      });
-      priceLines.push(pl);
-    });
-    // VRVP structural lines (always when toggle on)
-    if (filters.vrvp && DATA.state && DATA.state.vrvp) {
-      const v = DATA.state.vrvp;
-      [
-        { price: v.poc, color: 'rgba(232,168,56,0.95)', w: 2, title: 'POC', style: LightweightCharts.LineStyle.Solid },
-        { price: v.vah, color: 'rgba(230,220,196,0.45)', w: 1, title: 'VAH', style: LightweightCharts.LineStyle.Dashed },
-        { price: v.val, color: 'rgba(230,220,196,0.45)', w: 1, title: 'VAL', style: LightweightCharts.LineStyle.Dashed },
-      ].forEach(function (cfg) {
-        if (cfg.price == null) return;
-        const pl = candleSeries.createPriceLine({
-          price: cfg.price,
-          color: cfg.color,
-          lineWidth: cfg.w,
-          lineStyle: cfg.style,
-          axisLabelVisible: true,
-          title: cfg.title,
-        });
-        priceLines.push(pl);
-      });
-    }
-    renderLegend();
-    scheduleOverlay();
-  }
-
-  function renderLegend() {
-    const el = $('#levelLegend');
-    if (!el) return;
-    const parts = [];
-    if (filters.vrvp && DATA.state && DATA.state.vrvp) {
-      const v = DATA.state.vrvp;
-      parts.push('<span class="lg"><span class="sw va"></span>VA ' +
-        Number(v.val).toFixed(0) + '–' + Number(v.vah).toFixed(0) + '</span>');
-      parts.push('<span class="lg"><span class="sw poc"></span>POC ' + Number(v.poc).toFixed(1) + '</span>');
-    }
-    const rows = visibleLevels().slice().sort(function (a, b) { return b.price - a.price; });
-    rows.forEach(function (lv) {
-      const k = lv.kind === 'resistance' ? 'res' : (lv.kind === 'support' ? 'sup' : 'anc');
-      const dist = (lv.dist_pct >= 0 ? '+' : '') + Number(lv.dist_pct).toFixed(1) + '%';
-      parts.push('<span class="lg"><span class="sw ' + k + '"></span>' +
-        '<span class="px">' + lv.price.toFixed(1) + '</span> ' +
-        KIND_LABEL[lv.kind] + ' ' + dist + '</span>');
-    });
-    el.innerHTML = parts.join('');
-  }
-
+  /* —— Observe VRVP overlay (unchanged logic) —— */
   function scheduleOverlay() {
     if (overlayRaf) cancelAnimationFrame(overlayRaf);
     overlayRaf = requestAnimationFrame(function () {
@@ -242,14 +320,11 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     if (!filters.vrvp) return;
-
     const st = DATA.state || {};
     const vrvp = st.vrvp || {};
     const yOf = function (p) {
       try { return candleSeries.priceToCoordinate(p); } catch (e) { return null; }
     };
-
-    // Value area band
     if (vrvp.val != null && vrvp.vah != null) {
       const y1 = yOf(vrvp.vah);
       const y2 = yOf(vrvp.val);
@@ -268,8 +343,6 @@
         ctx.setLineDash([]);
       }
     }
-
-    // HVN / LVN horizontal bands from levels
     (DATA.levels || []).forEach(function (lv) {
       const tag = classifyVrvpLevel(lv);
       if (!tag || tag === 'poc' || tag === 'vah' || tag === 'val') return;
@@ -282,16 +355,8 @@
       } else if (tag === 'lvn') {
         ctx.fillStyle = 'rgba(212,120,58,0.14)';
         ctx.fillRect(0, y - bandH / 2, w, bandH);
-        ctx.strokeStyle = 'rgba(212,120,58,0.4)';
-        ctx.setLineDash([2, 3]);
-        ctx.beginPath();
-        ctx.moveTo(0, y); ctx.lineTo(w, y);
-        ctx.stroke();
-        ctx.setLineDash([]);
       }
     });
-
-    // Volume profile histogram on the right
     const prof = getProfile();
     if (!prof || !prof.max) return;
     const profileW = Math.min(96, Math.max(56, w * 0.14));
@@ -311,8 +376,6 @@
       ctx.fillStyle = inVA ? 'rgba(232,168,56,0.45)' : 'rgba(154,144,120,0.28)';
       ctx.fillRect(x0 + (profileW - 4 - bw), top, bw, bh);
     }
-
-    // POC marker on profile
     if (vrvp.poc != null) {
       const yp = yOf(vrvp.poc);
       if (yp != null) {
@@ -324,121 +387,74 @@
         ctx.stroke();
       }
     }
-
-    // Labels
     ctx.fillStyle = 'rgba(232,168,56,0.7)';
     ctx.font = '9px IBM Plex Mono, SF Mono, Menlo, monospace';
     ctx.textAlign = 'right';
     ctx.fillText('VRVP', w - 6, 12);
   }
 
+  function clearPriceLines() {
+    clearLines(candleSeries, priceLines);
+  }
+
+  function applyPriceLines() {
+    if (!candleSeries) return;
+    applyLevelLines(candleSeries, priceLines, visibleLevels(filters), filters.vrvp);
+    renderLegend();
+    scheduleOverlay();
+  }
+
+  function renderLegend() {
+    const el = $('#levelLegend');
+    if (!el) return;
+    const parts = [];
+    if (filters.vrvp && DATA.state && DATA.state.vrvp) {
+      const v = DATA.state.vrvp;
+      parts.push('<span class="lg"><span class="sw va"></span>VA ' +
+        Number(v.val).toFixed(0) + '–' + Number(v.vah).toFixed(0) + '</span>');
+      parts.push('<span class="lg"><span class="sw poc"></span>POC ' + Number(v.poc).toFixed(1) + '</span>');
+    }
+    visibleLevels(filters).slice().sort(function (a, b) { return b.price - a.price; })
+      .forEach(function (lv) {
+        const k = lv.kind === 'resistance' ? 'res' : (lv.kind === 'support' ? 'sup' : 'anc');
+        const dist = (lv.dist_pct >= 0 ? '+' : '') + Number(lv.dist_pct).toFixed(1) + '%';
+        parts.push('<span class="lg"><span class="sw ' + k + '"></span>' +
+          '<span class="px">' + lv.price.toFixed(1) + '</span> ' +
+          KIND_LABEL[lv.kind] + ' ' + dist + '</span>');
+      });
+    el.innerHTML = parts.join('');
+  }
+
   function buildChart() {
     const el = $('#chart');
     if (!el || typeof LightweightCharts === 'undefined') return;
     el.innerHTML = '';
-    chart = LightweightCharts.createChart(el, {
-      layout: {
-        background: { type: 'solid', color: '#12140e' },
-        textColor: '#9a9078',
-        fontSize: 11,
-        fontFamily: '"IBM Plex Mono", "SF Mono", Menlo, Consolas, monospace',
-      },
-      grid: {
-        vertLines: { color: '#2a2e22' },
-        horzLines: { color: '#2a2e22' },
-      },
-      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-      rightPriceScale: { borderColor: '#4e5240', scaleMargins: { top: 0.04, bottom: 0.06 } },
-      timeScale: { borderColor: '#4e5240', timeVisible: false, rightOffset: 4 },
-      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
-      handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
-    });
-
-    candleSeries = chart.addCandlestickSeries({
-      upColor: '#8fbc5a',
-      downColor: '#d4783a',
-      borderUpColor: '#8fbc5a',
-      borderDownColor: '#d4783a',
-      wickUpColor: '#8fbc5a',
-      wickDownColor: '#d4783a',
-    });
-
-    let candles = [];
-    if (DATA.ohlcv && DATA.ohlcv.length) {
-      candles = DATA.ohlcv.map(function (b) {
-        return { time: toUnix(b.date), open: b.open, high: b.high, low: b.low, close: b.close };
-      });
-    } else if (DATA.price_series && DATA.price_series.length) {
-      candles = DATA.price_series.map(function (b) {
-        const c = b.close;
-        return { time: toUnix(b.date), open: c, high: c, low: c, close: c };
-      });
-    }
-    candleSeries.setData(candles);
+    chart = LightweightCharts.createChart(el, chartTheme());
+    candleSeries = chart.addCandlestickSeries(candleOpts());
+    candleSeries.setData(candleData());
     applyPriceLines();
     chart.timeScale().fitContent();
-
-    chart.subscribeCrosshairMove(function (param) {
-      const bar = $('#crossBar');
-      if (!bar) return;
-      if (!param || !param.time || !param.seriesData) {
-        bar.textContent = '十字线 · OHLC';
-        return;
-      }
-      const d = param.seriesData.get(candleSeries);
-      if (!d) { bar.textContent = '—'; return; }
-      const t = param.time;
-      let dateStr = '';
-      if (typeof t === 'number') {
-        dateStr = new Date(t * 1000).toISOString().slice(0, 10);
-      } else if (t && t.year) {
-        dateStr = t.year + '-' + String(t.month).padStart(2, '0') + '-' + String(t.day).padStart(2, '0');
-      }
-      bar.innerHTML = '<strong>' + esc(dateStr) + '</strong>  O ' + d.open.toFixed(2) +
-        '  H ' + d.high.toFixed(2) + '  L ' + d.low.toFixed(2) +
-        '  C <strong>' + d.close.toFixed(2) + '</strong>';
-    });
-
+    bindCrosshair(chart, candleSeries, '#crossBar');
     chart.timeScale().subscribeVisibleLogicalRangeChange(scheduleOverlay);
     chart.subscribeCrosshairMove(scheduleOverlay);
-
-    function syncChartSize() {
-      if (!chart || !el) return;
-      const stack = el.parentElement;
-      const w = stack ? stack.clientWidth : el.clientWidth;
-      const h = stack ? stack.clientHeight : el.clientHeight;
-      if (w > 0 && h > 0) {
-        chart.applyOptions({ width: w, height: h });
-        scheduleOverlay();
-      }
-    }
-    const ro = new ResizeObserver(function () { syncChartSize(); });
-    const stack = el.closest('.chart-stack') || el;
-    ro.observe(stack);
-    const pane = el.closest('.chart-pane');
-    if (pane) ro.observe(pane);
-    const obs = el.closest('.obs');
-    if (obs) ro.observe(obs);
-    window.addEventListener('resize', syncChartSize);
-    requestAnimationFrame(function () {
-      requestAnimationFrame(syncChartSize);
-    });
-    syncChartSize();
+    bindResize(chart, el);
   }
 
-  function ensureChartSized() {
-    if (!chart) return;
-    const el = $('#chart');
-    const stack = el && el.parentElement;
-    const w = stack ? stack.clientWidth : (el && el.clientWidth);
-    const h = stack ? stack.clientHeight : (el && el.clientHeight);
+  function ensureChartSized(key) {
+    const pack = key ? tapes[key] : null;
+    const ch = pack ? pack.chart : chart;
+    const el = $(key === 'levels' ? '#chartLevels' : key === 'hold' ? '#chartHold' : key === 'break' ? '#chartBreak' : '#chart');
+    if (!ch || !el) return;
+    const stack = el.parentElement;
+    const w = stack ? stack.clientWidth : el.clientWidth;
+    const h = stack ? stack.clientHeight : el.clientHeight;
     if (w > 0 && h > 0) {
-      chart.applyOptions({ width: w, height: h });
-      chart.timeScale().fitContent();
-      scheduleOverlay();
+      ch.applyOptions({ width: w, height: h });
+      ch.timeScale().fitContent();
+      if (!key) scheduleOverlay();
     } else {
       requestAnimationFrame(function () {
-        requestAnimationFrame(ensureChartSized);
+        requestAnimationFrame(function () { ensureChartSized(key); });
       });
     }
   }
@@ -452,14 +468,12 @@
     if (winEl) {
       winEl.textContent = (defs.window || '') + (defs.n_bars ? ' · ' + defs.n_bars + 'K' : '');
     }
-
     const os = hold.overall_support || {};
     const or_ = hold.overall_resistance || {};
     $('#obsHoldKpi').innerHTML = [
       cell('支撑', pct(os.hit_rate), 'n=' + (os.n || 0), barHtml(os.hit_rate, '')),
       cell('压力', pct(or_.hit_rate), 'n=' + (or_.n || 0), barHtml(or_.hit_rate, 'res')),
     ].join('');
-
     const fam = hold.by_family || {};
     const ranked = Object.keys(fam).map(function (k) { return fam[k]; })
       .filter(function (f) { return f && f.n >= 3; })
@@ -478,7 +492,6 @@
           '<span class="n">n=' + f.n + '</span></div>';
       }).join('');
     }
-
     const sum = br.summary || {};
     const up = sum.up || {};
     const dn = sum.down || {};
@@ -497,14 +510,12 @@
     ].join('');
   }
 
-  /* —— 点位 visuals —— */
-  function renderLevelsViz() {
-    const rows = visibleLevels().slice().sort(function (a, b) { return b.price - a.price; });
+  /* —— 点位 —— */
+  function renderLevelsLadder() {
+    const rows = visibleLevels(lvFilters).slice().sort(function (a, b) { return b.price - a.price; });
     const maxAbs = Math.max.apply(null, rows.map(function (lv) {
       return Math.abs(Number(lv.dist_pct) || 0);
     }).concat([5]));
-    const last = Number(DATA.last_close);
-
     $('#levelsLadder').innerHTML = rows.map(function (lv) {
       const dist = Number(lv.dist_pct) || 0;
       const w = Math.min(100, (Math.abs(dist) / maxAbs) * 100);
@@ -517,155 +528,107 @@
           (dist >= 0 ? '+' : '') + dist.toFixed(1) + '%</div>' +
         '<div class="kind ' + KIND_CLASS[lv.kind] + '">' + KIND_LABEL[lv.kind] + '</div>' +
         '<div class="track"><i style="width:' + w.toFixed(1) + '%"></i></div>' +
-        '<div class="mark">' + (tag ? tag.toUpperCase() : (PRI_LABEL(lv.priority))) + '</div>' +
+        '<div class="mark">' + (tag ? tag.toUpperCase() : PRI_LABEL(lv.priority)) + '</div>' +
         '</div>';
     }).join('');
 
-    // key bands as layered zones across price range
-    const bands = (DATA.key_bands || []).filter(function (b) { return filters.kinds[b.kind]; });
-    const st = DATA.state || {};
-    const pLo = Number(st.window_low) || (last * 0.8);
-    const pHi = Number(st.window_high) || (last * 1.2);
-    const span = Math.max(1, pHi - pLo);
-    const pxPct = function (p) {
-      return Math.max(0, Math.min(100, ((p - pLo) / span) * 100));
-    };
-    const lastPct = pxPct(last);
-    $('#bandsViz').innerHTML = bands.map(function (b) {
-      const lo = Math.min(b.lo, b.hi);
-      const hi = Math.max(b.lo, b.hi);
-      const left = pxPct(lo);
-      const right = pxPct(hi);
-      const kcls = b.kind === 'resistance' ? 'res' : (b.kind === 'support' ? 'sup' : 'anc');
-      const rng = b.lo === b.hi ? String(b.lo) : (b.lo + '–' + b.hi);
-      return '<div class="bz ' + kcls + '">' +
-        '<div class="lb">' + esc(b.label) + '</div>' +
-        '<div class="zone">' +
-          '<i style="left:' + left.toFixed(2) + '%;width:' + Math.max(0.6, right - left).toFixed(2) + '%"></i>' +
-          '<span class="pxline" style="left:' + lastPct.toFixed(2) + '%"></span>' +
-        '</div>' +
-        '<div class="rng">' + esc(rng) + '</div></div>';
-    }).join('');
-
-    drawLevelsProfile();
+    const leg = $('#levelsLegend');
+    if (leg) {
+      leg.innerHTML = rows.slice(0, 8).map(function (lv) {
+        const k = lv.kind === 'resistance' ? 'res' : (lv.kind === 'support' ? 'sup' : 'anc');
+        return '<span class="lg"><span class="sw ' + k + '"></span>' + lv.price.toFixed(1) + '</span>';
+      }).join('');
+    }
   }
 
-  function PRI_LABEL(p) {
-    return ({ 0: '现价', 1: '高优', 2: '中', 3: '低' })[p] || String(p);
+  function refreshLevelsChart() {
+    const t = tapes.levels;
+    if (!t.series) return;
+    applyLevelLines(t.series, t.lines, visibleLevels(lvFilters), true);
+    renderLevelsLadder();
   }
 
-  function drawLevelsProfile() {
-    const canvas = $('#levelsProfile');
-    const meta = $('#levelsProfileMeta');
-    if (!canvas) return;
-    const prof = getProfile();
-    const vrvp = (DATA.state && DATA.state.vrvp) || {};
-    const dpr = window.devicePixelRatio || 1;
-    const cssW = canvas.clientWidth || 152;
-    const cssH = Math.max(280, canvas.clientHeight || 420);
-    canvas.width = Math.floor(cssW * dpr);
-    canvas.height = Math.floor(cssH * dpr);
-    canvas.style.height = cssH + 'px';
-    const ctx = canvas.getContext('2d');
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, cssW, cssH);
-
-    const padT = 8, padB = 8, padL = 4, padR = 36;
-    const plotH = cssH - padT - padB;
-    const plotW = cssW - padL - padR;
-    if (!prof) {
-      ctx.fillStyle = '#9a9078';
-      ctx.font = '11px IBM Plex Mono, SF Mono, Menlo, monospace';
-      ctx.fillText('无剖面', padL, 20);
+  function initLevelsChart() {
+    const el = $('#chartLevels');
+    if (!el || typeof LightweightCharts === 'undefined') return;
+    if (tapes.levels.inited) {
+      ensureChartSized('levels');
+      refreshLevelsChart();
       return;
     }
+    el.innerHTML = '';
+    const ch = LightweightCharts.createChart(el, chartTheme());
+    const series = ch.addCandlestickSeries(candleOpts());
+    series.setData(candleData());
+    tapes.levels = { chart: ch, series: series, lines: [], inited: true };
+    refreshLevelsChart();
+    ch.timeScale().fitContent();
+    bindCrosshair(ch, series, '#crossLevels');
+    bindResize(ch, el);
+    const fit = $('#btnFitLevels');
+    if (fit) fit.onclick = function () { ch.timeScale().fitContent(); };
+  }
 
-    const yOf = function (p) {
-      return padT + ((prof.hi - p) / (prof.hi - prof.lo)) * plotH;
-    };
+  /* —— 触及 —— */
+  function holdEventsFiltered() {
+    const ev = ((DATA.backtest || {}).hold || {}).events || [];
+    return ev.filter(function (e) {
+      if (holdFilters.side !== 'all' && e.side !== holdFilters.side) return false;
+      if (holdFilters.out === 'held' && !e.held) return false;
+      if (holdFilters.out === 'broken' && e.held) return false;
+      return true;
+    });
+  }
 
-    // VA band
-    if (vrvp.val != null && vrvp.vah != null) {
-      const y1 = yOf(vrvp.vah);
-      const y2 = yOf(vrvp.val);
-      ctx.fillStyle = 'rgba(232,168,56,0.08)';
-      ctx.fillRect(padL, Math.min(y1, y2), plotW, Math.abs(y2 - y1));
-    }
+  function refreshHoldMarkers() {
+    const t = tapes.hold;
+    if (!t.series) return;
+    const evs = holdEventsFiltered();
+    // one marker per date — prefer broken over held if both
+    const byDate = {};
+    evs.forEach(function (e) {
+      const cur = byDate[e.date];
+      if (!cur || (cur.held && !e.held)) byDate[e.date] = e;
+    });
+    const markers = Object.keys(byDate).sort().map(function (dt) {
+      const e = byDate[dt];
+      const held = !!e.held;
+      const isSup = e.side === 'support';
+      return {
+        time: toUnix(dt),
+        position: isSup ? 'belowBar' : 'aboveBar',
+        color: held ? '#8fbc5a' : '#d4783a',
+        shape: held ? 'circle' : 'square',
+        text: (isSup ? '撑' : '压') + (held ? '✓' : '✗'),
+      };
+    });
+    t.series.setMarkers(markers);
 
-    // Histogram bars (left-aligned)
-    for (let i = 0; i < prof.bins; i++) {
-      const pLo = prof.lo + i * prof.step;
-      const pHi = pLo + prof.step;
-      const top = yOf(pHi);
-      const bot = yOf(pLo);
-      const bh = Math.max(1, bot - top);
-      const ratio = prof.vol[i] / prof.max;
-      const bw = ratio * plotW;
-      const mid = (pLo + pHi) / 2;
-      const inVA = vrvp.val != null && vrvp.vah != null && mid >= vrvp.val && mid <= vrvp.vah;
-      ctx.fillStyle = inVA ? 'rgba(232,168,56,0.5)' : 'rgba(154,144,120,0.28)';
-      ctx.fillRect(padL, top, bw, bh);
-    }
-
-    // HVN / LVN ticks
-    (DATA.levels || []).forEach(function (lv) {
-      const tag = classifyVrvpLevel(lv);
-      if (tag !== 'hvn' && tag !== 'lvn') return;
-      const y = yOf(lv.price);
-      ctx.strokeStyle = tag === 'hvn' ? 'rgba(143,188,90,0.8)' : 'rgba(212,120,58,0.8)';
-      ctx.lineWidth = tag === 'hvn' ? 2 : 1;
-      ctx.setLineDash(tag === 'lvn' ? [3, 2] : []);
-      ctx.beginPath();
-      ctx.moveTo(padL, y);
-      ctx.lineTo(padL + plotW, y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = tag === 'hvn' ? '#8fbc5a' : '#d4783a';
-      ctx.font = '8px IBM Plex Mono, SF Mono, Menlo, monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText(tag.toUpperCase(), padL + plotW + 2, y + 3);
+    // draw level lines for recent events (unique levels)
+    clearLines(t.series, t.lines);
+    const seen = {};
+    evs.slice().reverse().forEach(function (e) {
+      const key = e.family + '|' + e.level;
+      if (seen[key]) return;
+      if (Object.keys(seen).length >= 12) return;
+      seen[key] = true;
+      t.lines.push(t.series.createPriceLine({
+        price: e.level,
+        color: e.side === 'support' ? 'rgba(143,188,90,0.55)' : 'rgba(212,120,58,0.55)',
+        lineWidth: 1,
+        lineStyle: LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: false,
+        title: e.family,
+      }));
     });
 
-    // POC / VAL / VAH labels
-    [
-      { p: vrvp.poc, lab: 'POC', c: '#e8a838' },
-      { p: vrvp.vah, lab: 'VAH', c: '#e6dcc4' },
-      { p: vrvp.val, lab: 'VAL', c: '#e6dcc4' },
-    ].forEach(function (x) {
-      if (x.p == null) return;
-      const y = yOf(x.p);
-      ctx.strokeStyle = x.c;
-      ctx.lineWidth = x.lab === 'POC' ? 2 : 1;
-      ctx.beginPath();
-      ctx.moveTo(padL, y);
-      ctx.lineTo(padL + plotW + 2, y);
-      ctx.stroke();
-      ctx.fillStyle = x.c;
-      ctx.font = 'bold 9px IBM Plex Mono, SF Mono, Menlo, monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText(x.lab, padL + plotW + 2, y - 2);
-    });
-
-    // last price
-    const last = Number(DATA.last_close);
-    const yl = yOf(last);
-    ctx.strokeStyle = 'rgba(232,168,56,0.65)';
-    ctx.setLineDash([2, 2]);
-    ctx.beginPath();
-    ctx.moveTo(padL, yl);
-    ctx.lineTo(padL + plotW, yl);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    if (meta) {
-      meta.innerHTML = 'POC <strong>' + Number(vrvp.poc).toFixed(1) + '</strong><br>' +
-        'VA <strong>' + Number(vrvp.val).toFixed(0) + '–' + Number(vrvp.vah).toFixed(0) + '</strong><br>' +
-        (vrvp.price_vs_va === 'inside_va' ? '现价在价值区内' : esc(vrvp.price_vs_va || ''));
+    const cross = $('#crossHold');
+    if (cross) {
+      cross.innerHTML = '触及事件 <strong>' + evs.length + '</strong> · 图上标记 ' + markers.length;
     }
   }
 
-  /* —— 触及 visuals —— */
-  function renderHoldTab() {
+  function renderHoldRail() {
     const bt = DATA.backtest || {};
     const hold = bt.hold || {};
     const def = (bt.definitions && bt.definitions.hold_def_zh) || '';
@@ -673,57 +636,135 @@
     if (holdDef) {
       holdDef.textContent = def.replace(/描述性回测，非交易建议。?$/, '').trim();
     }
+    const win = $('#holdWin');
+    if (win) win.textContent = (bt.definitions && bt.definitions.window) || '';
     const os = hold.overall_support || {};
     const or_ = hold.overall_resistance || {};
     $('#holdKpi').innerHTML = [
-      cell('支撑守住', pct(os.hit_rate), 'n=' + (os.n || 0), barHtml(os.hit_rate, '')),
-      cell('压力守住', pct(or_.hit_rate), 'n=' + (or_.n || 0), barHtml(or_.hit_rate, 'res')),
-      cell('事件', String(hold.n_events || 0), (bt.definitions && bt.definitions.window) || ''),
+      cell('支撑', pct(os.hit_rate), 'n=' + (os.n || 0), barHtml(os.hit_rate, '')),
+      cell('压力', pct(or_.hit_rate), 'n=' + (or_.n || 0), barHtml(or_.hit_rate, 'res')),
+      cell('事件', String(hold.n_events || 0), '冷却10K'),
     ].join('');
-
-    const ss = $('#holdSideSplit');
-    if (ss) {
-      ss.innerHTML =
-        '<div class="ss"><div class="k">支撑</div><div class="v">' + pct(os.hit_rate) + '</div></div>' +
-        '<div class="ss r"><div class="k">压力</div><div class="v">' + pct(or_.hit_rate) + '</div></div>';
-    }
-
     const fam = hold.by_family || {};
     const list = Object.keys(fam).map(function (k) { return fam[k]; })
       .filter(function (f) { return f && f.n > 0; })
       .sort(function (a, b) { return (b.hit_rate || 0) - (a.hit_rate || 0); });
-
     $('#holdChart').innerHTML = list.map(function (f) {
       const isR = f.side === 'resistance';
       const w = Math.max(0, Math.min(100, (f.hit_rate || 0) * 100));
-      return '<div class="hb ' + (isR ? 'r' : '') + '">' +
-        '<div class="nm">' + esc(f.family || '') + '</div>' +
-        '<div class="sd ' + (isR ? 'r' : '') + '">' + (isR ? '压' : '撑') + '</div>' +
-        '<div class="trk"><i style="width:' + w.toFixed(1) + '%"></i></div>' +
-        '<div class="rt">' + pct(f.hit_rate) + '</div>' +
-        '<div class="n">n=' + f.n + '</div></div>';
+      return '<div class="fam"><span class="nm">' + esc(f.family || '') +
+        '<span class="tag ' + (isR ? 'r' : '') + '">' + (isR ? '压' : '撑') + '</span></span>' +
+        '<span class="rt">' + pct(f.hit_rate) + '</span>' +
+        '<div class="fb ' + (isR ? 'r' : '') + '"><i style="width:' + w.toFixed(1) + '%"></i></div>' +
+        '<span class="n">n=' + f.n + '</span></div>';
     }).join('');
   }
 
-  /* —— 突破 visuals —— */
+  function initHoldChart() {
+    const el = $('#chartHold');
+    if (!el || typeof LightweightCharts === 'undefined') return;
+    if (tapes.hold.inited) {
+      ensureChartSized('hold');
+      refreshHoldMarkers();
+      return;
+    }
+    el.innerHTML = '';
+    const ch = LightweightCharts.createChart(el, chartTheme());
+    const series = ch.addCandlestickSeries(candleOpts());
+    series.setData(candleData());
+    tapes.hold = { chart: ch, series: series, lines: [], inited: true };
+    refreshHoldMarkers();
+    ch.timeScale().fitContent();
+    bindCrosshair(ch, series, '#crossHold');
+    bindResize(ch, el);
+    const fit = $('#btnFitHold');
+    if (fit) fit.onclick = function () { ch.timeScale().fitContent(); };
+  }
+
+  /* —— 突破 —— */
+  function breakEventsFiltered() {
+    const br = (DATA.backtest || {}).breakout || {};
+    let ev = br.events || [];
+    if (!ev.length) {
+      ev = [].concat(br.examples_up || [], br.examples_down || []);
+    }
+    return ev.filter(function (e) {
+      if (brkFilters.dir !== 'all' && e.dir !== brkFilters.dir) return false;
+      return true;
+    });
+  }
+
+  function refreshBreakMarkers() {
+    const t = tapes.break;
+    if (!t.series) return;
+    const evs = breakEventsFiltered();
+    // one marker per date+dir (LWCharts allows one set per series)
+    const seen = {};
+    const markers = [];
+    evs.forEach(function (e) {
+      const key = e.date + '|' + e.dir;
+      if (seen[key]) return;
+      seen[key] = true;
+      const up = e.dir === 'up';
+      const r5 = e.rets && e.rets['5'];
+      markers.push({
+        time: toUnix(e.date),
+        position: up ? 'aboveBar' : 'belowBar',
+        color: up ? '#e8a838' : '#d4783a',
+        shape: up ? 'arrowUp' : 'arrowDown',
+        text: (up ? '↑' : '↓') + (r5 != null ? pctPts(r5, 1) : ''),
+      });
+    });
+    // LWCharts: only one marker per time — keep last for same timestamp
+    const byTime = {};
+    markers.forEach(function (m) { byTime[m.time] = m; });
+    const dedup = Object.keys(byTime).map(Number).sort(function (a, b) { return a - b; })
+      .map(function (t) { return byTime[t]; });
+    markers.length = 0;
+    dedup.forEach(function (m) { markers.push(m); });
+    t.series.setMarkers(markers);
+
+    clearLines(t.series, t.lines);
+    const seenLv = {};
+    evs.slice().reverse().forEach(function (e) {
+      const key = e.family + '|' + e.level;
+      if (seenLv[key]) return;
+      if (Object.keys(seenLv).length >= 10) return;
+      seenLv[key] = true;
+      t.lines.push(t.series.createPriceLine({
+        price: e.level,
+        color: e.dir === 'up' ? 'rgba(232,168,56,0.55)' : 'rgba(212,120,58,0.55)',
+        lineWidth: 1,
+        lineStyle: LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: false,
+        title: e.family,
+      }));
+    });
+
+    const cross = $('#crossBreak');
+    if (cross) {
+      cross.innerHTML = '突破事件 <strong>' + evs.length + '</strong> · 图上标记 ' + markers.length;
+    }
+  }
+
   function mapRetToPct(v, minR, maxR) {
     if (v == null || Number.isNaN(v)) return 50;
     const span = Math.max(1e-6, maxR - minR);
     return ((v - minR) / span) * 100;
   }
 
-  function renderBreakTab() {
+  function renderBreakRail() {
     const bt = DATA.backtest || {};
     const br = bt.breakout || {};
     const def = (bt.definitions && bt.definitions.break_def_zh) || '';
     const breakDef = $('#breakDef');
     if (breakDef) breakDef.textContent = def.trim();
+    const win = $('#breakWin');
+    if (win) win.textContent = (bt.definitions && bt.definitions.window) || '';
 
     const sum = br.summary || {};
     const up = sum.up || {};
     const dn = sum.down || {};
-
-    // Collect range for IQR scale across all horizons
     let minR = 0, maxR = 0;
     [up, dn].forEach(function (side) {
       [1, 3, 5].forEach(function (h) {
@@ -732,7 +773,6 @@
         if (s.p75 != null) maxR = Math.max(maxR, s.p75, s.median || 0);
       });
     });
-    // pad
     const pad = Math.max(1, (maxR - minR) * 0.08);
     minR -= pad; maxR += pad;
 
@@ -754,56 +794,47 @@
         '</div></div>';
     }
     $('#breakHorizon').innerHTML = [
-      hzCard('up', 1), hzCard('up', 3), hzCard('up', 5),
-      hzCard('down', 1), hzCard('down', 3), hzCard('down', 5),
-    ].join('');
-
-    function hCard(dir, h) {
-      const s = (dir === 'up' ? up : dn)[h] || {};
-      return cell(
-        (dir === 'up' ? '↑' : '↓') + h + 'd',
-        '<span class="' + clsRet(s.median) + '">' + pctPts(s.median) + '</span>',
-        '胜 ' + pct(s.win_rate),
-        barHtml(s.win_rate, dir === 'down' ? 'res' : '')
-      );
-    }
-    $('#breakKpi').innerHTML = [
-      hCard('up', 1), hCard('up', 5),
-      hCard('down', 1), hCard('down', 5),
+      hzCard('up', 1), hzCard('up', 5),
+      hzCard('down', 1), hzCard('down', 5),
     ].join('');
 
     const fam = br.by_family_h5 || {};
     const list = Object.keys(fam).map(function (k) { return fam[k]; })
       .filter(function (f) { return f && f.n > 0; })
       .sort(function (a, b) { return (b.median || 0) - (a.median || 0); });
-
-    let fMin = 0, fMax = 0;
-    list.forEach(function (f) {
-      if (f.p25 != null) fMin = Math.min(fMin, f.p25, f.median || 0);
-      if (f.p75 != null) fMax = Math.max(fMax, f.p75, f.median || 0);
-    });
-    const fPad = Math.max(1, (fMax - fMin) * 0.08);
-    fMin -= fPad; fMax += fPad;
-
     $('#breakChart').innerHTML = list.map(function (f) {
       const isDn = f.dir === 'down';
-      const left = mapRetToPct(f.p25, fMin, fMax);
-      const right = mapRetToPct(f.p75, fMin, fMax);
-      const med = mapRetToPct(f.median, fMin, fMax);
-      const zero = mapRetToPct(0, fMin, fMax);
-      return '<div class="fc ' + (isDn ? 'dn' : '') + '">' +
-        '<div class="nm">' + esc(f.family || '') + '</div>' +
-        '<div class="dir ' + (isDn ? 'dn' : '') + '">' + (isDn ? '↓' : '↑') + '</div>' +
-        '<div class="axis">' +
-          '<span class="zero" style="left:' + zero.toFixed(1) + '%"></span>' +
-          '<span class="iqr" style="left:' + left.toFixed(1) + '%;width:' +
-            Math.max(1, right - left).toFixed(1) + '%"></span>' +
-          '<span class="med" style="left:' + med.toFixed(1) + '%"></span>' +
-        '</div>' +
-        '<div class="md ' + clsRet(f.median) + '">' + pctPts(f.median) + '</div></div>';
+      return '<div class="fam"><span class="nm">' + esc(f.family || '') +
+        '<span class="tag ' + (isDn ? 'r' : '') + '">' + (isDn ? '↓' : '↑') + '</span></span>' +
+        '<span class="rt ' + clsRet(f.median) + '">' + pctPts(f.median) + '</span>' +
+        '<div class="fb ' + (isDn ? 'r' : '') + '"><i style="width:' +
+          Math.max(0, Math.min(100, (f.win_rate || 0) * 100)).toFixed(1) + '%"></i></div>' +
+        '<span class="n">n=' + f.n + ' 胜' + pct(f.win_rate) + '</span></div>';
     }).join('');
   }
 
+  function initBreakChart() {
+    const el = $('#chartBreak');
+    if (!el || typeof LightweightCharts === 'undefined') return;
+    if (tapes.break.inited) {
+      ensureChartSized('break');
+      refreshBreakMarkers();
+      return;
+    }
+    el.innerHTML = '';
+    const ch = LightweightCharts.createChart(el, chartTheme());
+    const series = ch.addCandlestickSeries(candleOpts());
+    series.setData(candleData());
+    tapes.break = { chart: ch, series: series, lines: [], inited: true };
+    refreshBreakMarkers();
+    ch.timeScale().fitContent();
+    bindCrosshair(ch, series, '#crossBreak');
+    bindResize(ch, el);
+    const fit = $('#btnFitBreak');
+    if (fit) fit.onclick = function () { ch.timeScale().fitContent(); };
+  }
+
+  /* —— filters / views —— */
   function syncPresetButtons() {
     document.querySelectorAll('[data-preset]').forEach(function (btn) {
       btn.classList.toggle('on', btn.getAttribute('data-preset') === filters.preset);
@@ -814,11 +845,24 @@
     });
     const vbtn = $('#btnVrvp');
     if (vbtn) vbtn.classList.toggle('on', !!filters.vrvp);
-  }
 
-  function refreshLevelDependent() {
-    applyPriceLines();
-    renderLevelsViz();
+    document.querySelectorAll('[data-lv-preset]').forEach(function (btn) {
+      btn.classList.toggle('on', btn.getAttribute('data-lv-preset') === lvFilters.preset);
+    });
+    document.querySelectorAll('[data-lv-kind]').forEach(function (btn) {
+      const k = btn.getAttribute('data-lv-kind');
+      btn.classList.toggle('on', !!lvFilters.kinds[k]);
+    });
+
+    document.querySelectorAll('[data-hold-side]').forEach(function (btn) {
+      btn.classList.toggle('on', btn.getAttribute('data-hold-side') === holdFilters.side);
+    });
+    document.querySelectorAll('[data-hold-out]').forEach(function (btn) {
+      btn.classList.toggle('on', btn.getAttribute('data-hold-out') === holdFilters.out);
+    });
+    document.querySelectorAll('[data-brk-dir]').forEach(function (btn) {
+      btn.classList.toggle('on', btn.getAttribute('data-brk-dir') === brkFilters.dir);
+    });
   }
 
   function bindFilters() {
@@ -826,7 +870,7 @@
       btn.addEventListener('click', function () {
         filters.preset = btn.getAttribute('data-preset');
         syncPresetButtons();
-        refreshLevelDependent();
+        applyPriceLines();
       });
     });
     document.querySelectorAll('[data-kind]').forEach(function (btn) {
@@ -834,7 +878,7 @@
         const k = btn.getAttribute('data-kind');
         filters.kinds[k] = !filters.kinds[k];
         syncPresetButtons();
-        refreshLevelDependent();
+        applyPriceLines();
       });
     });
     const vbtn = $('#btnVrvp');
@@ -853,6 +897,44 @@
         scheduleOverlay();
       });
     }
+
+    document.querySelectorAll('[data-lv-preset]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        lvFilters.preset = btn.getAttribute('data-lv-preset');
+        syncPresetButtons();
+        refreshLevelsChart();
+      });
+    });
+    document.querySelectorAll('[data-lv-kind]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const k = btn.getAttribute('data-lv-kind');
+        lvFilters.kinds[k] = !lvFilters.kinds[k];
+        syncPresetButtons();
+        refreshLevelsChart();
+      });
+    });
+
+    document.querySelectorAll('[data-hold-side]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        holdFilters.side = btn.getAttribute('data-hold-side');
+        syncPresetButtons();
+        refreshHoldMarkers();
+      });
+    });
+    document.querySelectorAll('[data-hold-out]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        holdFilters.out = btn.getAttribute('data-hold-out');
+        syncPresetButtons();
+        refreshHoldMarkers();
+      });
+    });
+    document.querySelectorAll('[data-brk-dir]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        brkFilters.dir = btn.getAttribute('data-brk-dir');
+        syncPresetButtons();
+        refreshBreakMarkers();
+      });
+    });
   }
 
   function switchView(id) {
@@ -871,9 +953,15 @@
     }
     if (id === 'observe') {
       requestAnimationFrame(function () { ensureChartSized(); });
-    }
-    if (id === 'levels') {
-      requestAnimationFrame(function () { drawLevelsProfile(); });
+    } else if (id === 'levels') {
+      initLevelsChart();
+      requestAnimationFrame(function () { ensureChartSized('levels'); });
+    } else if (id === 'hold') {
+      initHoldChart();
+      requestAnimationFrame(function () { ensureChartSized('hold'); });
+    } else if (id === 'break') {
+      initBreakChart();
+      requestAnimationFrame(function () { ensureChartSized('break'); });
     }
   }
 
@@ -896,9 +984,9 @@
     renderHeader();
     buildChart();
     renderObsAccuracy();
-    renderLevelsViz();
-    renderHoldTab();
-    renderBreakTab();
+    renderLevelsLadder();
+    renderHoldRail();
+    renderBreakRail();
     syncPresetButtons();
     bindFilters();
     bindViews();
