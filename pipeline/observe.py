@@ -5,6 +5,7 @@
 """
 import math
 
+import keylevels
 from events import wilson
 from levels import _unfilled_gaps
 
@@ -241,7 +242,59 @@ def _merge(raw):
     return out
 
 
-def window_guide(bars, ind, nb, wl, pooled, own_hold, uni, ft_cache):
+def _zones(levels, win, px, a, p, boll, ind, uni, ft_cache):
+    zones = []
+    g = lambda k: ind[k][-1]
+    for up, dn in zip(levels, levels[1:]):
+        hi, lo = up["price"], dn["price"]
+        z = {"hi": hi, "lo": lo, "width_pct": round((hi / lo - 1) * 100, 2),
+             "atr_w": round((hi - lo) / a, 2) if a else None,
+             "days_in": sum(1 for b in win if lo <= b["close"] <= hi),
+             "current": lo <= px <= hi}
+        if p:
+            vs, ps, inside = _vol_between(p, lo, hi)
+            z["vol_share"] = round(vs, 3)
+            z["inside_frac"] = round(inside, 2)
+            z["density"] = round(vs / ps, 2) if ps > 0.01 else None
+            z["tags"] = _zone_tags(z, p, boll)
+        if z["current"] and a:
+            ku, kd = round((hi - px) / a, 1), round((px - lo) / a, 1)
+            s200 = g("sma200")
+            reg = None if s200 is None else px > s200
+            key = (ku, kd, reg)
+            if key not in ft_cache:
+                ft_cache[key] = first_touch(uni, max(ku, 0.05), max(kd, 0.05), reg)
+            ft = ft_cache[key]
+            if ft:
+                z["first_touch"] = dict(ft, up_atr=ku, down_atr=kd, regime=None if reg is None else ("up" if reg else "down"))
+        zones.append(z)
+    return zones
+
+
+def _summary(levels, zones, px, a):
+    above = [x for x in levels if x["kind"] == "resistance"]
+    below = [x for x in levels if x["kind"] == "support"]
+    R = sorted(above, key=lambda x: x["price"])
+    S = sorted(below, key=lambda x: -x["price"])
+    cur = next((z for z in zones if z["current"]), None)
+    out = {"close": round(px, 2)}
+    if R:
+        out["r1"] = R[0]["price"]
+        out["r1_break"] = round(R[0]["price"] + keylevels.FAIL_ATR * a, 2)
+        out["r2"] = R[1]["price"] if len(R) > 1 else None
+    if S:
+        out["s1"] = S[0]["price"]
+        out["s1_break"] = round(S[0]["price"] - keylevels.FAIL_ATR * a, 2)
+        out["s2"] = S[1]["price"] if len(S) > 1 else None
+    if R and S:
+        up, dn = R[0]["price"] - px, px - S[0]["price"]
+        out["room_ratio"] = round(up / dn, 2) if dn > 0 else None
+    if cur and cur.get("first_touch"):
+        out["first_touch"] = cur["first_touch"]
+    return out
+
+
+def window_guide(bars, ind, nb, wl, pooled, own_hold, uni, ft_cache, km=None):
     n = len(bars)
     i = n - 1
     px = bars[i]["close"]
@@ -293,53 +346,37 @@ def window_guide(bars, ind, nb, wl, pooled, own_hold, uni, ft_cache):
                                  "own": {"n": of["n"], "rate": of["hit_rate"]} if of else None}
         ln["group"] = ln["members"][0]["group"]
 
-    zones = []
     boll = (g("boll_up"), g("boll_lo"))
-    for up, dn in zip(lines, lines[1:]):
-        hi, lo = up["price"], dn["price"]
-        z = {"hi": hi, "lo": lo, "width_pct": round((hi / lo - 1) * 100, 2),
-             "atr_w": round((hi - lo) / a, 2) if a else None,
-             "days_in": sum(1 for b in win if lo <= b["close"] <= hi),
-             "current": lo <= px <= hi}
-        if p:
-            vs, ps, inside = _vol_between(p, lo, hi)
-            z["vol_share"] = round(vs, 3)
-            z["inside_frac"] = round(inside, 2)
-            z["density"] = round(vs / ps, 2) if ps > 0.01 else None
-            z["tags"] = _zone_tags(z, p, boll)
-        if z["current"] and a:
-            ku, kd = round((hi - px) / a, 1), round((px - lo) / a, 1)
-            s200 = g("sma200")
-            reg = None if s200 is None else px > s200
-            key = (ku, kd, reg)
-            if key not in ft_cache:
-                ft_cache[key] = first_touch(uni, max(ku, 0.05), max(kd, 0.05), reg)
-            ft = ft_cache[key]
-            if ft:
-                z["first_touch"] = dict(ft, up_atr=ku, down_atr=kd, regime=None if reg is None else ("up" if reg else "down"))
-        zones.append(z)
+    zones = _zones(lines, win, px, a, p, boll, ind, uni, ft_cache)
+    key = None
+    if km:
+        kl = keylevels.judge(km, bars, ind, nb, wl)
+        if kl:
+            kz = _zones(kl, win, px, a, p, boll, ind, uni, ft_cache)
+            key = {"levels": kl, "zones": kz, "summary": _summary(kl, kz, px, a)}
 
     prof = None
     if p:
         mx = max(p["vol"])
         prof = {"lo": _r(p["lo"]), "step": round(p["step"], 4), "vol": [round(v / mx * 1000) for v in p["vol"]],
                 "poc": _r(p["poc"]), "val": _r(p["val"]), "vah": _r(p["vah"])}
-    return {"bars": nb, "from": win[0]["date"], "lines": lines, "zones": zones, "profile": prof,
+    return {"bars": nb, "from": win[0]["date"], "lines": lines, "zones": zones, "profile": prof, "key": key,
             "atr14": _r(a), "close": _r(px)}
 
 
-def build(bars, ind, own_bt, pooled, uni, ft_cache):
+def build(bars, ind, own_bt, pooled, uni, ft_cache, km=None):
     own_hold = own_bt["hold"]["by_family"]
     by = {}
     for key, nb, wl in WINDOWS:
         if len(bars) >= nb:
-            by[key] = dict(window_guide(bars, ind, nb, wl, pooled, own_hold, uni, ft_cache), label=wl)
+            by[key] = dict(window_guide(bars, ind, nb, wl, pooled, own_hold, uni, ft_cache, km), label=wl)
     return {
         "windows": [{"key": k, "bars": nb, "label": wl} for k, nb, wl in WINDOWS if k in by],
         "default": DEFAULT_WINDOW if DEFAULT_WINDOW in by else next(iter(by), None),
         "by_window": by,
         "defs": {k: {"what": v[2], "use": v[3]} for k, v in DEFS.items()},
         "zone_tags": {k: {"label": v[0], "text": v[1]} for k, v in ZONE_TAGS.items()},
+        "key_model": keylevels.model_card(km) if km else None,
         "training": {"n_symbols": pooled["n_symbols"], "years": pooled["years"],
                      "first_touch_days": FIRST_TOUCH_DAYS,
                      "hold_def": "触及后 5 个交易日内收盘没有反向穿越这条线超过 1.5% 算「守住」；对照 = 把同一条线整体平移 ±2%/±4% 后按同样规则统计（随机线）。",
