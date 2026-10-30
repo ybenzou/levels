@@ -325,8 +325,9 @@
   }
 
   /* —— 观察：近 1/2/3 月窗口 · 模型判断的关键位 + 可选参考线 —— */
-  const obs = { win: '3m', hot: null, hotZone: null, ref: false };
+  const obs = { win: '3m', hot: null, hotZone: null, ref: false, hist: true };
   let obsLines = [];
+  const histSeries = { r1: null, s1: null };
   const AUTOSCALE_PCT = 12;
   const GROUP_STYLE = {
     ma: { style: 0, w: 1, zh: '均线', dash: '' },
@@ -349,10 +350,15 @@
   function loadWinPref() {
     const o = obsData();
     if (!o) return;
-    let saved = null, ref = null;
-    try { saved = localStorage.getItem('levels.window'); ref = localStorage.getItem('levels.ref'); } catch (e) { /* */ }
+    let saved = null, ref = null, hist = null;
+    try {
+      saved = localStorage.getItem('levels.window');
+      ref = localStorage.getItem('levels.ref');
+      hist = localStorage.getItem('levels.hist');
+    } catch (e) { /* */ }
     obs.win = saved && o.by_window[saved] ? saved : o.default;
     obs.ref = ref === '1';
+    obs.hist = hist !== '0';
   }
 
   function kindRgb(kind) { return kind === 'resistance' ? '255,184,58' : '159,212,95'; }
@@ -383,9 +389,9 @@
       .sort(function (a, b) { return res ? a.price - b.price : b.price - a.price; });
     const nx = same[same.indexOf(lv) + 1];
     return {
-      hold: '碰到后看' + (res ? '回落' : '反弹') + '到 <b>' + lv.target.toFixed(2) + '</b>（' + (res ? '−' : '+') + '1 ATR）',
-      fail: '收盘' + (res ? '站上' : '跌破') + ' <b>' + lv.fail.toFixed(2) + '</b> 算' + (res ? '突破' : '失效') + ' → ' +
-        (nx ? '下一个看 ' + keyName(k, nx) + ' <b>' + nx.price.toFixed(2) + '</b>' : '窗口内' + (res ? '上方' : '下方') + '没有更多关键位')
+      hold: '守住 = 碰到后先' + (res ? '回落' : '反弹') + '到 <b>' + lv.target.toFixed(2) + '</b>（' + (res ? '−' : '+') + '1 ATR）',
+      fail: '突破 = 收盘' + (res ? '站上' : '跌破') + ' <b>' + lv.fail.toFixed(2) + '</b>；延续 = 再走到 <b>' + lv.follow_to.toFixed(2) + '</b>',
+      next: nx ? '下一个关键位 ' + keyName(k, nx) + ' <b>' + nx.price.toFixed(2) + '</b>' : '窗口内' + (res ? '上方' : '下方') + '没有更多关键位'
     };
   }
 
@@ -503,8 +509,8 @@
       const lv = w.key.levels[Number(id.slice(1))];
       el.innerHTML = swatch('key', lv.kind, KEY_W[lv.salience]) + '<b>' + keyName(w.key, lv) + '</b> <span class="px">' +
         lv.price.toFixed(2) + '</span> <span class="' + (lv.kind === 'resistance' ? 'kind-res' : 'kind-sup') + '">' +
-        pctPts(lv.dist_pct, 1) + '</span> · 10 日内碰到 ' + pct(lv.reach) + ' · 碰到后' + (lv.kind === 'resistance' ? '回落' : '反弹') +
-        ' ' + pct(lv.react) + ' · ' + keyPlan(w.key, lv).fail;
+        pctPts(lv.dist_pct, 1) + '</span> · 10 日内碰到 ' + pct(lv.reach) + ' · 碰到后守住 ' + pct(lv.hold) +
+        ' / 突破 ' + pct(lv.brk) + ' · 突破后延续 ' + pct(lv.follow) + ' · ' + keyPlan(w.key, lv).fail;
       return;
     }
     if (id && id[0] === 'r') {
@@ -521,7 +527,7 @@
         (z.tags || []).map(function (t) { return esc((tags[t] || {}).label || t); }).join(' · ') + ' · 宽 ' + z.width_pct.toFixed(1) + '%';
       return;
     }
-    el.innerHTML = '<span class="muted">实线 = 模型从价格结构里找出的关键位，色带 = ±0.3 ATR 反应区；鼠标移上去看概率和失效线</span>';
+    el.innerHTML = '<span class="muted">实线 = 模型从价格结构里找出的关键位，色带 = ±0.3 ATR 反应区；鼠标移上去看概率；回放 = 每天画的 R1/S1 和它们的结局</span>';
   }
 
   function setHot(line, zone) {
@@ -583,8 +589,10 @@
 
   function keyCard(k, lv, i, rg, km) {
     const c = lv.kind === 'resistance' ? 'res' : 'sup';
-    const verb = lv.kind === 'resistance' ? '先回落' : '先反弹';
     const plan = keyPlan(k, lv);
+    const cell = function (y, label) {
+      return '<div><span>' + label + ' <b>' + pct(lv[y]) + '</b></span>' + probBar(lv[y], c === 'res' ? 'r' : '') + '</div>';
+    };
     return '<div class="gl key ' + c + ' sl-' + lv.salience + '" data-li="k' + i + '">' +
       '<div class="gl-h">' + swatch('key', lv.kind, KEY_W[lv.salience]) + '<b class="px">' + lv.price.toFixed(2) + '</b>' +
       '<span class="nm">' + keyName(k, lv) + '</span><span class="stg" title="结构分 ' + lv.score.toFixed(1) +
@@ -592,9 +600,9 @@
       '<span class="d ' + (c === 'res' ? 'kind-res' : 'kind-sup') + '">' + pctPts(lv.dist_pct, 1) + ' · ' +
       Math.abs(lv.atr_dist).toFixed(1) + ' ATR</span></div>' +
       (inChart(lv, rg) ? '' : '<div class="gl-off">在图外：离现价太远</div>') +
-      '<ul class="why"><li>' + plan.hold + '</li><li>' + plan.fail + '</li></ul>' +
-      '<div class="gl-p two"><div><span>' + km.reach_days + ' 日内碰到 <b>' + pct(lv.reach) + '</b></span>' + probBar(lv.reach, c === 'res' ? 'r' : '') + '</div>' +
-      '<div><span>碰到后' + verb + ' ' + km.win_atr + ' ATR <b>' + pct(lv.react) + '</b></span>' + probBar(lv.react, c === 'res' ? 'r' : '', 0.5) + '</div></div>' +
+      '<div class="gl-p two">' + cell('reach', km.reach_days + ' 日内碰到') + cell('hold', '碰到后守住') +
+      cell('brk', '碰到后突破') + cell('follow', '突破后延续') + '</div>' +
+      '<ul class="why"><li>' + plan.hold + '</li><li>' + plan.fail + '</li><li>' + plan.next + '</li></ul>' +
       '</div>';
   }
 
@@ -638,42 +646,79 @@
         pct(f.down) + '</b>、都没碰到 ' + pct(f.none) + '。');
     }
     if (S1) {
-      items.push('<span class="k sup">回落</span>到 ' + nm(S1) + '：10 日内到这里的概率 ' + pct(S1.reach) + '，到了之后先反弹 1 ATR 的概率 ' +
-        pct(S1.react) + '。收盘跌破 <b>' + s.s1_break.toFixed(2) + '</b> 算这条支撑失效' +
+      items.push('<span class="k sup">回落</span>到 ' + nm(S1) + '：10 日内到这里的概率 ' + pct(S1.reach) + '；到了之后守住 ' +
+        pct(S1.hold) + '、跌破 ' + pct(S1.brk) + '，跌破后 ' + pct(S1.follow) + ' 会继续下行 1 ATR。收盘跌破 <b>' + s.s1_break.toFixed(2) + '</b> 算跌破' +
         (S2 ? '，下一个看 ' + nm(S2) + '。' : '，' + esc(w.label) + '内下方没有更多关键支撑。'));
     }
     if (R1) {
-      items.push('<span class="k res">上涨</span>到 ' + nm(R1) + '：10 日内到这里的概率 ' + pct(R1.reach) + '，到了之后先回落 1 ATR 的概率 ' +
-        pct(R1.react) + '。收盘站上 <b>' + s.r1_break.toFixed(2) + '</b> 算突破' +
+      items.push('<span class="k res">上涨</span>到 ' + nm(R1) + '：10 日内到这里的概率 ' + pct(R1.reach) + '；到了之后守住 ' +
+        pct(R1.hold) + '、突破 ' + pct(R1.brk) + '，突破后 ' + pct(R1.follow) + ' 会继续上行 1 ATR。收盘站上 <b>' + s.r1_break.toFixed(2) + '</b> 算突破' +
         (R2 ? '，下一个看 ' + nm(R2) + '。' : '，' + esc(w.label) + '内上方没有更多关键压力。'));
     }
     return '<div class="jd"><div class="jd-h">模型判断 · ' + esc(w.label) + '</div><ul>' +
       items.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></div>';
   }
 
-  function checkHtml(km) {
-    if (!km || !km.oos) return '';
-    const o = km.oos;
-    const e = o.edge || {};
-    const pp = function (x) {
-      if (!x || x.edge == null) return '—';
-      return (x.edge >= 0 ? '+' : '') + (x.edge * 100).toFixed(1) + ' ± ' + (x.ci * 100).toFixed(1);
+  const VAR_ZH = { base: '历史平均', ctx: '距离+趋势', full: '距离+趋势+线的结构' };
+
+  function epText(e) {
+    const sup = e.side === 'support';
+    const md = function (d) { return d ? d.slice(5) : ''; };
+    let t = md(e.from) + ' 画 <b>' + e.price.toFixed(2) + '</b>';
+    if (e.result === 'wait') return t + ' → 还没碰到';
+    if (e.result === 'miss') return t + ' → 20 日内没碰到';
+    t += ' → ' + md(e.touch) + ' 碰到';
+    if (e.result === 'pending') return t + ' → 进行中';
+    if (e.result === 'chop') return t + ' → 来回震荡，没分出胜负';
+    if (e.result === 'hold') return t + ' → ' + md(e.rdate) + (sup ? ' 反弹' : ' 回落') + ' 1 ATR，<span class="ok">守住</span>';
+    t += ' → ' + md(e.rdate) + ' 收盘' + (sup ? '跌破' : '站上') + '，<span class="bad">突破</span>';
+    if (e.follow === 1) return t + ' → ' + md(e.fdate) + ' 再走 1 ATR（延续）';
+    if (e.follow === 0) return t + ' → ' + md(e.fdate) + ' 收回（假突破）';
+    return t + ' → 后续进行中';
+  }
+
+  function backtestHtml(k, w, km) {
+    const o = km.oos || {};
+    const outs = km.outcomes || [];
+    const h = k && k.history;
+    let html = '<div class="mc"><div class="sec-l">预估线回测 · 画出来的线后来怎样了</div>';
+    if (h && h.score && h.score_from) {
+      html += '<div class="note">本股 · ' + esc(w.label) + '窗口：' + esc(h.score_from.slice(0, 4)) + ' 年起每 3 天按今天同样的规则画线，' +
+        '用 ' + esc((km.split || '').slice(0, 4)) + ' 年以前的数据训练出的预估（没见过这些行情）：</div>' +
+        '<table class="mt"><thead><tr><th></th><th>预估</th><th>实际</th><th>次数</th></tr></thead><tbody>' +
+        outs.map(function (x) {
+          const r = h.score[x.key] || {};
+          return '<tr><td>' + esc(x.label) + '</td><td>' + pct(r.pred) + '</td><td><b>' + pct(r.rate) + '</b></td><td>' + (r.n || 0) + '</td></tr>';
+        }).join('') + '</tbody></table>';
+    }
+    if (h && h.episodes && h.episodes.length) {
+      const eps = h.episodes.slice(-8).reverse();
+      html += '<div class="note">最近画的线（图上「回放」）：</div><ul class="eps">' + eps.map(function (e) {
+        return '<li><span class="k ' + (e.side === 'support' ? 'sup">S1' : 'res">R1') + '</span>' + epText(e) + '</li>';
+      }).join('') + '</ul>';
+    }
+    const sk = function (v) {
+      if (!v || v.skill == null) return '—';
+      if (v.skill > 0.005) return '<span class="ok">准 ' + (v.skill * 100).toFixed(0) + '%</span>';
+      if (v.skill < -0.005) return '<span class="bad">差 ' + (-v.skill * 100).toFixed(1) + '%</span>';
+      return '持平';
     };
-    const row = function (lab, k, cls) {
-      return '<tr class="' + (cls || '') + '"><td>' + lab + '</td><td>' + pp((e[k] || {}).support) + '</td><td>' + pp((e[k] || {}).resistance) + '</td></tr>';
-    };
-    const dec = o.reach_deciles || [];
-    const cal = dec.length ? dec.filter(function (_, i) { return i % 3 === 1; }).map(function (d) {
-      return '预测 ' + pct(d[0]) + ' → 实际 ' + pct(d[1]);
-    }).join('，') : '';
-    return '<div class="mc"><div class="sec-l">模型体检 · 样本外（' + esc(o.split.slice(0, 4)) + ' 年以后，训练时没见过）</div>' +
-      '<div class="note"><b>「10 日内碰到」</b>的概率是准的：' + cal + '（AUC ' + (o.reach_auc || 0).toFixed(2) + '）。</div>' +
-      '<div class="note"><b>「碰到后先反向」</b>只能靠距离和趋势粗略区分（AUC ' + (o.react_auc || 0).toFixed(2) + '）。' +
-      '价位本身多给的有效率（百分点，实际 − 同距离同趋势的预期，±95% 区间）：</div>' +
-      '<table class="mt"><thead><tr><th></th><th>当支撑</th><th>当压力</th></tr></thead><tbody>' +
-      row('结构关键位（本页）', 'structure', 'pick') + row('常用参考线', 'ref') + row('随机价位', 'random') +
-      '</tbody></table><div class="note">结论：关键位适合用来<b>定计划</b>（在哪里观察、跌破/突破哪里算错、下一步看哪里），' +
-      '但别指望某一条线本身「一定撑得住」——10 年回测里，转折点、均线、布林这些位置被碰到后的表现，和同样距离的随机价位只差 1 个百分点左右。</div></div>';
+    html += '<div class="note">训练有没有让预估更准：' + (km.n_symbols || '—') + ' 只股票 × ' + (km.years || '—') + ' 年画出的线，' +
+      esc((km.split || '').slice(0, 4)) + ' 年以前训练、以后检验，误差（Brier）和「历史平均」比：</div>' +
+      '<table class="mt"><thead><tr><th></th><th>历史平均</th><th>距离+趋势</th><th>+线的结构</th><th>采用</th></tr></thead><tbody>' +
+      outs.map(function (x) {
+        const r = o[x.key] || {};
+        return '<tr><td>' + esc(x.label) + '</td><td>' + pct(r.rate) + '</td><td>' + sk(r.ctx) + '</td><td>' + sk(r.full) + '</td><td>' +
+          esc(VAR_ZH[r.best] || '—') + '</td></tr>';
+      }).join('') + '</tbody></table>';
+    const better = outs.filter(function (x) { return (o[x.key] || {}).best && o[x.key].best !== 'base'; });
+    const flat = outs.filter(function (x) { return (o[x.key] || {}).best === 'base'; });
+    html += '<div class="note">结论：' +
+      (better.length ? better.map(function (x) { return '「' + esc(x.label) + '」'; }).join('') + '训练后明显更准，页面用训练后的模型。' : '') +
+      (flat.length ? flat.map(function (x) { return '「' + esc(x.label) + '」'; }).join('') +
+        '试过距离、趋势、线的结构、动量、成交量、近期战绩，都没有比历史平均更准，所以直接用这些线过去 10 年的实际比例（支撑和压力分开算）。' : '') +
+      '每次更新数据都会重新回测、重新训练、重新比较。</div></div>';
+    return html;
   }
 
   function renderGuide() {
@@ -699,7 +744,7 @@
     } else {
       html += '<div class="muted" style="padding:10px 12px">窗口内没有找到模型认可的关键位</div>';
     }
-    html += checkHtml(km);
+    html += backtestHtml(k, w, km);
     html += '<div class="ref-h"><button type="button" class="tog ' + (obs.ref ? 'on' : '') + '" data-ref-toggle>参考线 ' +
       (obs.ref ? '已显示' : '已隐藏') + '</button><span class="muted">均线、布林、高低点、成交剖面等常用标志线，只作对照</span></div>';
     if (obs.ref) w.lines.forEach(function (ln, i) { html += refCard(ln, i, o, rg); });
@@ -724,6 +769,7 @@
     const key = $('#obsKey');
     if (key) {
       let kh = '<span class="ky">' + swatch('key', 'support', 3) + '关键位（越粗越显著）</span>';
+      if (obs.hist) kh += '<span class="ky">' + swatch('swing', 'support') + '回放：当天画的 R1/S1 · 守 = 守住 · 破 = 被突破</span>';
       if (obs.ref) {
         const groups = {};
         w.lines.forEach(function (ln) { groups[ln.group] = true; });
@@ -735,6 +781,8 @@
     }
     const rb = $('#btnRef');
     if (rb) rb.classList.toggle('on', obs.ref);
+    const hb = $('#btnHist');
+    if (hb) hb.classList.toggle('on', obs.hist);
     const rail = list.closest('.rail');
     if (rail) rail.scrollTop = 0;
     footHint();
@@ -746,6 +794,48 @@
     try { localStorage.setItem('levels.ref', on ? '1' : '0'); } catch (e) { /* */ }
     renderGuide();
     if (chart) { applyObsLines(); scheduleOverlay(); }
+  }
+
+  function setHist(on) {
+    obs.hist = on;
+    try { localStorage.setItem('levels.hist', on ? '1' : '0'); } catch (e) { /* */ }
+    renderGuide();
+    applyHist();
+  }
+
+  function histMarkers(h) {
+    const from = winFrom();
+    const ms = [], seen = {};
+    h.episodes.forEach(function (e) {
+      if (!e.rdate || e.rdate < from || (e.result !== 'hold' && e.result !== 'brk')) return;
+      const id = e.rdate + e.side + e.result;
+      if (seen[id]) return;
+      seen[id] = true;
+      const held = e.result === 'hold';
+      ms.push({
+        time: toUnix(e.rdate),
+        position: e.side === 'support' ? 'belowBar' : 'aboveBar',
+        color: held ? '#9fff5c' : '#ff6b4a',
+        shape: held ? 'circle' : 'square',
+        size: 0.7,
+        text: held ? '守' : '破',
+      });
+    });
+    return ms.sort(function (a, b) { return a.time - b.time; });
+  }
+
+  function applyHist() {
+    if (!chart || !candleSeries) return;
+    const k = obsKey();
+    const h = obs.hist && k ? k.history : null;
+    ['r1', 's1'].forEach(function (key) {
+      const sr = histSeries[key];
+      if (!sr) return;
+      sr.setData(h ? h.track[key].map(function (p) {
+        return p[1] == null ? { time: toUnix(p[0]) } : { time: toUnix(p[0]), value: p[1] };
+      }) : []);
+    });
+    candleSeries.setMarkers(h ? histMarkers(h) : []);
   }
 
   function bindGuideCrosshair() {
@@ -795,7 +885,16 @@
     chart = LightweightCharts.createChart(el, chartTheme());
     candleSeries = chart.addCandlestickSeries(Object.assign(candleOpts(), { autoscaleInfoProvider: obsAutoscale }));
     candleSeries.setData(candleData(nBars()));
+    const step = LightweightCharts.LineType ? LightweightCharts.LineType.WithSteps : 1;
+    ['r1', 's1'].forEach(function (key) {
+      histSeries[key] = chart.addLineSeries({
+        color: key === 'r1' ? 'rgba(255,184,58,0.6)' : 'rgba(159,212,95,0.6)', lineWidth: 1,
+        lineStyle: LightweightCharts.LineStyle.Dotted, lineType: step, priceLineVisible: false, lastValueVisible: false,
+        crosshairMarkerVisible: false, autoscaleInfoProvider: function () { return null; },
+      });
+    });
     applyObsLines();
+    applyHist();
     fitWithGutter(chart, nBars(), obsGutter());
     bindCrosshair(chart, candleSeries, '#crossBar');
     bindGuideCrosshair();
@@ -868,6 +967,7 @@
     if (chart) {
       candleSeries.setData(candleData(nBars()));
       applyObsLines();
+      applyHist();
       fitWithGutter(chart, nBars(), obsGutter());
       scheduleOverlay();
     }
@@ -1938,6 +2038,8 @@
   function bindFilters() {
     const rbtn = $('#btnRef');
     if (rbtn) rbtn.addEventListener('click', function () { setRef(!obs.ref); });
+    const hbtn = $('#btnHist');
+    if (hbtn) hbtn.addEventListener('click', function () { setHist(!obs.hist); });
     const vbtn = $('#btnVrvp');
     if (vbtn) {
       vbtn.addEventListener('click', function () {

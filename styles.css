@@ -1686,3 +1686,10 @@ body::after {
 .ref-h .tog { border: 1px solid var(--line); }
 .gl-p.two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .mc .note b { color: var(--cream); }
+.gl-p.two { row-gap: 6px; }
+.mc .ok { color: var(--crt); }
+.mc .bad { color: #ff6b4a; }
+.mc .eps { list-style: none; padding: 4px 12px 0; }
+.mc .eps li { font-size: 13px; line-height: 1.55; color: var(--muted); }
+.mc .eps li b { color: var(--cream); }
+.mc .eps .k { margin-right: 6px; }
