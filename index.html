@@ -7,9 +7,8 @@
   <meta name="theme-color" content="#0c0e09" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>Levels · AVGO</title>
-  <link rel="stylesheet" href="./styles.css?v=20261030145531" />
+  <link rel="stylesheet" href="./styles.css?v=20261030160000" />
   <script src="https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="./fallback-data.js?v=20261030145531"></script>
 </head>
 <body>
   <div class="app" id="app">
@@ -19,28 +18,90 @@
         <div class="title-row">
           <h1 id="title">AVGO</h1>
           <div class="ticker-switch" id="tickerSwitch" role="group" aria-label="标的">
-            <button type="button" class="tick on" data-symbol="AVGO" title="当前">AVGO</button>
-            <button type="button" class="tick soon" data-symbol="SKHY" disabled title="即将加入">SKHY</button>
-            <button type="button" class="tick soon" data-symbol="CRWV" disabled title="即将加入">CRWV</button>
+            <button type="button" class="tick on" data-symbol="AVGO" title="Broadcom">AVGO</button>
+            <button type="button" class="tick" data-symbol="SKHY" title="SK hynix（美股）">SKHY</button>
+            <button type="button" class="tick" data-symbol="CRWV" title="CoreWeave">CRWV</button>
           </div>
         </div>
       </div>
       <div class="mast-c" id="asof">—</div>
       <div class="mast-r">
         <span class="stamp">REC</span>
-        <span class="disc">描述性 · 非建议</span>
+        <span class="disc">模型参考 · 非投资建议</span>
       </div>
     </header>
 
     <nav class="tabs" role="tablist" aria-label="视图">
-      <button type="button" class="tab on" data-view="observe">观察</button>
+      <button type="button" class="tab on" data-view="signal">信号</button>
+      <button type="button" class="tab" data-view="observe">观察</button>
       <button type="button" class="tab" data-view="levels">点位</button>
       <button type="button" class="tab" data-view="hold">触及</button>
       <button type="button" class="tab" data-view="break">突破</button>
       <button type="button" class="tab" data-view="playback">回测</button>
     </nav>
 
-    <section class="view on" id="view-observe" aria-label="观察">
+    <section class="view on" id="view-signal" aria-label="信号">
+      <div class="obs sig">
+        <div class="chart-pane">
+          <div class="tool">
+            <div class="toggles" role="group" aria-label="风险偏好">
+              <span class="tool-l">风险偏好</span>
+              <button type="button" class="tog" data-profile="conservative" title="每只股票年化波动预算 6%">保守</button>
+              <button type="button" class="tog on" data-profile="balanced" title="每只股票年化波动预算 10%">平衡</button>
+              <button type="button" class="tog" data-profile="aggressive" title="每只股票年化波动预算 15%">积极</button>
+              <span class="sep"></span>
+              <button type="button" class="tog on" data-curve="constant" title="与模型同等平均仓位、从不调仓">同仓固定</button>
+              <button type="button" class="tog on" data-curve="buy_hold" title="100% 满仓一直持有">满仓持有</button>
+            </div>
+            <button type="button" class="tog ghost" id="btnFitSig">适配</button>
+          </div>
+          <div class="chart-stack">
+            <div id="chartSig" role="img" aria-label="资金曲线：风险预算仓位与持有对比"></div>
+          </div>
+          <div class="sig-metrics" id="sigMetrics"></div>
+          <div class="chart-foot">
+            <div class="ohlc" id="crossSig">资金曲线 · 对数坐标</div>
+            <div class="legend tight" id="sigLegend">
+              <span class="lg"><span class="sw anc-solid"></span>风险预算仓位</span>
+              <span class="lg"><span class="sw cream"></span>同仓固定</span>
+              <span class="lg"><span class="sw sup"></span>满仓持有</span>
+              <span class="lg"><span class="sw va"></span>仓位</span>
+            </div>
+          </div>
+        </div>
+        <aside class="rail" aria-label="今日信号">
+          <div class="rail-h">今日信号 <span id="sigDate" class="rail-sub"></span></div>
+          <div id="sigWarn"></div>
+          <div class="rail-sec">
+            <div class="sec-l">建议仓位</div>
+            <div id="sigSize"></div>
+          </div>
+          <div class="rail-sec">
+            <div class="sec-l">资金换算</div>
+            <div id="sigCash"></div>
+          </div>
+          <div class="rail-sec">
+            <div class="sec-l">加仓时机 <span class="weak">弱信号</span></div>
+            <div id="sigTiming"></div>
+          </div>
+          <div class="rail-sec">
+            <div class="sec-l">状态与风控</div>
+            <div id="sigRisk"></div>
+          </div>
+          <div class="rail-sec" id="sigProxySec" hidden>
+            <div class="sec-l">母股参考</div>
+            <div id="sigProxy"></div>
+          </div>
+          <div class="rail-sec">
+            <div class="sec-l">模型体检</div>
+            <div id="sigCheck"></div>
+          </div>
+          <p class="def tight rail-def" id="sigDef"></p>
+        </aside>
+      </div>
+    </section>
+
+    <section class="view" id="view-observe" hidden aria-label="观察">
       <div class="obs">
         <div class="chart-pane">
           <div class="tool">
@@ -178,7 +239,7 @@
           <div class="rail-h">突破收益 <span id="breakWin" class="rail-sub"></span></div>
           <div id="breakHorizon" class="horizon-grid compact"></div>
           <div class="rail-sec grow">
-            <div class="sec-l">分族 +5d</div>
+            <div class="sec-l">分族 +5d 超额</div>
             <div id="breakChart" class="fam-list"></div>
           </div>
           <p class="def tight rail-def" id="breakDef"></p>
@@ -247,6 +308,6 @@
     </section>
 
   </div>
-  <script src="./app.js?v=20261030145531"></script>
+  <script src="./app.js?v=20261030160000"></script>
 </body>
 </html>

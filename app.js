@@ -77,21 +77,75 @@
       val + '</div>' + (sub ? '<div class="sub">' + esc(sub) + '</div>' : '') +
       (bar || '') + '</div>';
   }
+  function windowLabel(defs) {
+    if (!defs) return '';
+    const yrs = defs.years ? defs.years + ' 年' : (defs.window || '');
+    return yrs + (defs.n_bars ? ' · ' + defs.n_bars + 'K' : '') + (defs.display_from ? ' · 图上近1年' : '');
+  }
+  function ciText(lo, hi) {
+    if (lo == null || hi == null) return '';
+    return '[' + Math.round(lo * 100) + '–' + Math.round(hi * 100) + '%]';
+  }
+  function holdSub(s, base) {
+    return 'n=' + (s.n || 0) + (base != null ? ' · 对照 ' + pct(base) : '');
+  }
+  function famHoldRow(f, hold) {
+    const isR = f.side === 'resistance';
+    const base = isR ? hold.baseline_resistance : hold.baseline_support;
+    const w = Math.max(0, Math.min(100, (f.hit_rate || 0) * 100));
+    const beat = base != null && f.ci_lo != null && f.ci_lo > base;
+    return '<div class="fam"><span class="nm">' + esc(f.family || '') +
+      '<span class="tag ' + (isR ? 'r' : '') + '">' + (isR ? '压' : '撑') + '</span>' +
+      (beat ? '<span class="tag ok" title="95% 区间下沿高于对照">✓</span>' : '') + '</span>' +
+      '<span class="rt">' + pct(f.hit_rate) + '</span>' +
+      '<div class="fb ' + (isR ? 'r' : '') + '"><i style="width:' + w.toFixed(1) + '%"></i>' +
+      (base != null ? '<b class="base" style="left:' + (base * 100).toFixed(1) + '%"></b>' : '') + '</div>' +
+      '<span class="n">n=' + f.n + ' ' + ciText(f.ci_lo, f.ci_hi) + '</span></div>';
+  }
+
   function PRI_LABEL(p) {
     return ({ 0: '现价', 1: '高优', 2: '中', 3: '低' })[p] || String(p);
   }
 
+  const SYMBOLS = ['AVGO', 'SKHY', 'CRWV'];
+  const VIEWS = ['signal', 'observe', 'levels', 'hold', 'break', 'playback'];
+
+  function currentSymbol() {
+    const s = (new URLSearchParams(location.search).get('s') || '').toUpperCase();
+    return SYMBOLS.indexOf(s) >= 0 ? s : 'AVGO';
+  }
+
+  function loadScript(src) {
+    return new Promise(function (resolve) {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = s.onerror = function () { resolve(); };
+      document.head.appendChild(s);
+    });
+  }
+
+  async function fetchJson(url) {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error(url + ' HTTP ' + res.status);
+    return res.json();
+  }
+
   async function loadData() {
+    const sym = currentSymbol();
     try {
-      const res = await fetch('./data.json', { cache: 'no-store' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      return await res.json();
+      return await fetchJson('./data/' + sym + '.json');
     } catch (e) {
-      if (window.__AVGO_FALLBACK__) {
-        console.warn('data.json fetch failed, using fallback', e);
-        return window.__AVGO_FALLBACK__;
+      if (sym !== 'AVGO') throw e;
+      try {
+        return await fetchJson('./data.json');
+      } catch (e2) {
+        await loadScript('./fallback-data.js');
+        if (window.__AVGO_FALLBACK__) {
+          console.warn('data fetch failed, using fallback', e2);
+          return window.__AVGO_FALLBACK__;
+        }
+        throw e2;
       }
-      throw e;
     }
   }
 
@@ -312,9 +366,15 @@
     $('#asof').innerHTML = '截至 <strong>' + esc(DATA.as_of) + '</strong> · 末收 <strong>' +
       close + '</strong>';
     document.querySelectorAll('#tickerSwitch .tick').forEach(function (btn) {
-      const on = btn.getAttribute('data-symbol') === sym;
+      const s = btn.getAttribute('data-symbol');
+      const on = s === sym;
       btn.classList.toggle('on', on);
       btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.onclick = function () {
+        if (on) return;
+        const view = (location.hash || '').replace('#', '');
+        location.href = '?s=' + s + (VIEWS.indexOf(view) >= 0 ? '#' + view : '');
+      };
     });
   }
 
@@ -466,9 +526,9 @@
   }
 
   function ensureChartSized(key) {
-    const pack = key ? tapes[key] : null;
+    const pack = key === 'signal' ? { chart: sig.chart } : (key ? tapes[key] : null);
     const ch = pack ? pack.chart : chart;
-    const el = $(key === 'levels' ? '#chartLevels' : key === 'hold' ? '#chartHold' : key === 'break' ? '#chartBreak' : key === 'playback' ? '#chartPlay' : '#chart');
+    const el = $(key === 'signal' ? '#chartSig' : key === 'levels' ? '#chartLevels' : key === 'hold' ? '#chartHold' : key === 'break' ? '#chartBreak' : key === 'playback' ? '#chartPlay' : '#chart');
     if (!ch || !el) return;
     const stack = el.parentElement;
     const w = stack ? stack.clientWidth : el.clientWidth;
@@ -490,32 +550,23 @@
     const br = bt.breakout || {};
     const defs = bt.definitions || {};
     const winEl = $('#accWindow');
-    if (winEl) {
-      winEl.textContent = (defs.window || '') + (defs.n_bars ? ' · ' + defs.n_bars + 'K' : '');
-    }
+    if (winEl) winEl.textContent = windowLabel(defs);
     const os = hold.overall_support || {};
     const or_ = hold.overall_resistance || {};
     $('#obsHoldKpi').innerHTML = [
-      cell('支撑', pct(os.hit_rate), 'n=' + (os.n || 0), barHtml(os.hit_rate, '')),
-      cell('压力', pct(or_.hit_rate), 'n=' + (or_.n || 0), barHtml(or_.hit_rate, 'res')),
+      cell('支撑', pct(os.hit_rate), holdSub(os, hold.baseline_support), barHtml(os.hit_rate, '')),
+      cell('压力', pct(or_.hit_rate), holdSub(or_, hold.baseline_resistance), barHtml(or_.hit_rate, 'res')),
     ].join('');
     const fam = hold.by_family || {};
+    // Rank by the lower confidence bound so tiny samples can't top the list.
     const ranked = Object.keys(fam).map(function (k) { return fam[k]; })
-      .filter(function (f) { return f && f.n >= 3; })
-      .sort(function (a, b) { return (b.hit_rate || 0) - (a.hit_rate || 0); })
+      .filter(function (f) { return f && f.n >= 10; })
+      .sort(function (a, b) { return (b.ci_lo || 0) - (a.ci_lo || 0); })
       .slice(0, 6);
     if (!ranked.length) {
-      $('#obsTopFamilies').innerHTML = '<div class="muted" style="padding:4px 12px;font-size:15px">—</div>';
+      $('#obsTopFamilies').innerHTML = '<div class="muted" style="padding:4px 12px;font-size:15px">样本不足（每族需 ≥10 次）</div>';
     } else {
-      $('#obsTopFamilies').innerHTML = ranked.map(function (f) {
-        const isR = f.side === 'resistance';
-        const w = Math.max(0, Math.min(100, (f.hit_rate || 0) * 100));
-        return '<div class="fam"><span class="nm">' + esc(f.family || '') +
-          '<span class="tag ' + (isR ? 'r' : '') + '">' + (isR ? '压' : '撑') + '</span></span>' +
-          '<span class="rt">' + pct(f.hit_rate) + '</span>' +
-          '<div class="fb ' + (isR ? 'r' : '') + '"><i style="width:' + w.toFixed(1) + '%"></i></div>' +
-          '<span class="n">n=' + f.n + '</span></div>';
-      }).join('');
+      $('#obsTopFamilies').innerHTML = ranked.map(function (f) { return famHoldRow(f, hold); }).join('');
     }
     const sum = br.summary || {};
     const up = sum.up || {};
@@ -523,9 +574,9 @@
     function bcell(dir, h) {
       const s = (dir === 'up' ? up : dn)[h] || {};
       return cell(
-        (dir === 'up' ? '↑' : '↓') + h + 'd',
-        '<span class="' + clsRet(s.median) + '">' + pctPts(s.median) + '</span>',
-        '胜 ' + pct(s.win_rate) + ' n=' + (s.n || 0),
+        (dir === 'up' ? '↑' : '↓') + h + 'd 超额',
+        '<span class="' + clsRet(s.excess_mean) + '">' + pctPts(s.excess_mean, 2) + '</span>',
+        '均 ' + pctPts(s.mean, 2) + ' 胜' + pct(s.win_rate) + ' n=' + (s.n || 0),
         barHtml(s.win_rate, dir === 'down' ? 'res' : '')
       );
     }
@@ -662,27 +713,21 @@
       holdDef.textContent = def.replace(/描述性回测，非交易建议。?$/, '').trim();
     }
     const win = $('#holdWin');
-    if (win) win.textContent = (bt.definitions && bt.definitions.window) || '';
+    if (win) win.textContent = windowLabel(bt.definitions);
     const os = hold.overall_support || {};
     const or_ = hold.overall_resistance || {};
+    const rg = hold.by_regime || {};
     $('#holdKpi').innerHTML = [
-      cell('支撑', pct(os.hit_rate), 'n=' + (os.n || 0), barHtml(os.hit_rate, '')),
-      cell('压力', pct(or_.hit_rate), 'n=' + (or_.n || 0), barHtml(or_.hit_rate, 'res')),
-      cell('事件', String(hold.n_events || 0), '冷却10K'),
+      cell('支撑', pct(os.hit_rate), holdSub(os, hold.baseline_support), barHtml(os.hit_rate, '')),
+      cell('压力', pct(or_.hit_rate), holdSub(or_, hold.baseline_resistance), barHtml(or_.hit_rate, 'res')),
+      cell('上升趋势撑', pct((rg['up|support'] || {}).hit_rate), 'n=' + ((rg['up|support'] || {}).n || 0)),
+      cell('下降趋势撑', pct((rg['down|support'] || {}).hit_rate), 'n=' + ((rg['down|support'] || {}).n || 0)),
     ].join('');
     const fam = hold.by_family || {};
     const list = Object.keys(fam).map(function (k) { return fam[k]; })
       .filter(function (f) { return f && f.n > 0; })
-      .sort(function (a, b) { return (b.hit_rate || 0) - (a.hit_rate || 0); });
-    $('#holdChart').innerHTML = list.map(function (f) {
-      const isR = f.side === 'resistance';
-      const w = Math.max(0, Math.min(100, (f.hit_rate || 0) * 100));
-      return '<div class="fam"><span class="nm">' + esc(f.family || '') +
-        '<span class="tag ' + (isR ? 'r' : '') + '">' + (isR ? '压' : '撑') + '</span></span>' +
-        '<span class="rt">' + pct(f.hit_rate) + '</span>' +
-        '<div class="fb ' + (isR ? 'r' : '') + '"><i style="width:' + w.toFixed(1) + '%"></i></div>' +
-        '<span class="n">n=' + f.n + '</span></div>';
-    }).join('');
+      .sort(function (a, b) { return (b.ci_lo || 0) - (a.ci_lo || 0); });
+    $('#holdChart').innerHTML = list.map(function (f) { return famHoldRow(f, hold); }).join('');
   }
 
   function initHoldChart() {
@@ -785,7 +830,7 @@
     const breakDef = $('#breakDef');
     if (breakDef) breakDef.textContent = def.trim();
     const win = $('#breakWin');
-    if (win) win.textContent = (bt.definitions && bt.definitions.window) || '';
+    if (win) win.textContent = windowLabel(bt.definitions);
 
     const sum = br.summary || {};
     const up = sum.up || {};
@@ -810,7 +855,8 @@
       return '<div class="hz ' + (dir === 'down' ? 'dn' : '') + '">' +
         '<div class="k">' + (dir === 'up' ? '↑' : '↓') + h + 'd</div>' +
         '<div class="med ' + clsRet(s.median) + '">' + pctPts(s.median) + '</div>' +
-        '<div class="meta">胜 ' + pct(s.win_rate) + ' · n=' + (s.n || 0) + '</div>' +
+        '<div class="meta">胜 ' + pct(s.win_rate) + ' · n=' + (s.n || 0) +
+          (s.excess_mean != null ? ' · 超额 <span class="' + clsRet(s.excess_mean) + '">' + pctPts(s.excess_mean, 2) + '</span>' : '') + '</div>' +
         '<div class="dist">' +
           '<span class="zero" style="left:' + zero.toFixed(1) + '%"></span>' +
           '<span class="iqr" style="left:' + left.toFixed(1) + '%;width:' +
@@ -826,15 +872,17 @@
     const fam = br.by_family_h5 || {};
     const list = Object.keys(fam).map(function (k) { return fam[k]; })
       .filter(function (f) { return f && f.n > 0; })
-      .sort(function (a, b) { return (b.median || 0) - (a.median || 0); });
+      .sort(function (a, b) { return (b.excess_mean || 0) - (a.excess_mean || 0); });
     $('#breakChart').innerHTML = list.map(function (f) {
       const isDn = f.dir === 'down';
+      const sig = f.mean_ci != null && Math.abs(f.excess_mean || 0) > f.mean_ci;
       return '<div class="fam"><span class="nm">' + esc(f.family || '') +
-        '<span class="tag ' + (isDn ? 'r' : '') + '">' + (isDn ? '↓' : '↑') + '</span></span>' +
-        '<span class="rt ' + clsRet(f.median) + '">' + pctPts(f.median) + '</span>' +
+        '<span class="tag ' + (isDn ? 'r' : '') + '">' + (isDn ? '↓' : '↑') + '</span>' +
+        (sig ? '<span class="tag ok" title="超额超出 95% 误差范围">✓</span>' : '') + '</span>' +
+        '<span class="rt ' + clsRet(f.excess_mean) + '" title="+5日超额（减去同期平均）">' + pctPts(f.excess_mean, 2) + '</span>' +
         '<div class="fb ' + (isDn ? 'r' : '') + '"><i style="width:' +
           Math.max(0, Math.min(100, (f.win_rate || 0) * 100)).toFixed(1) + '%"></i></div>' +
-        '<span class="n">n=' + f.n + ' 胜' + pct(f.win_rate) + '</span></div>';
+        '<span class="n">n=' + f.n + ' 胜' + pct(f.win_rate) + ' ±' + (f.mean_ci != null ? f.mean_ci.toFixed(1) : '—') + '</span></div>';
     }).join('');
   }
 
@@ -1242,6 +1290,330 @@
   }
 
 
+  /* —— 信号 —— */
+  const sig = {
+    profile: null,
+    curves: { constant: true, buy_hold: true },
+    chart: null, series: {}, inited: false,
+  };
+
+  function model() { return DATA.model || null; }
+
+  function loadPrefs() {
+    const m = model();
+    let p = null;
+    try { p = localStorage.getItem('levels.profile'); } catch (e) { /* */ }
+    const keys = ((m && m.profiles) || []).map(function (x) { return x.key; });
+    sig.profile = keys.indexOf(p) >= 0 ? p : ((m && m.default_profile) || 'balanced');
+  }
+
+  function sizingSource() {
+    const m = model();
+    if (!m) return null;
+    const own = m.sizing && m.sizing[sig.profile];
+    if (own) return { s: own, proxy: null };
+    const px = m.proxy && m.proxy.sizing && m.proxy.sizing[sig.profile];
+    if (px) return { s: px, proxy: m.proxy };
+    return null;
+  }
+
+  function fmtMoney(x, cur) {
+    if (x == null || !isFinite(x)) return '—';
+    const sym = ({ USD: '$', KRW: '₩', HKD: 'HK$', CNY: '¥' })[cur] || '';
+    return sym + Math.round(x).toLocaleString('en-US');
+  }
+
+  function eqPct(v) { return ((v - 1) * 100).toFixed(0) + '%'; }
+
+  function initSignalChart() {
+    const el = $('#chartSig');
+    if (!el || typeof LightweightCharts === 'undefined') return;
+    if (sig.inited) { refreshSignalChart(); return; }
+    el.innerHTML = '';
+    const theme = chartTheme();
+    theme.rightPriceScale = Object.assign({}, theme.rightPriceScale, {
+      mode: LightweightCharts.PriceScaleMode.Logarithmic,
+      scaleMargins: { top: 0.06, bottom: 0.24 },
+    });
+    const ch = LightweightCharts.createChart(el, theme);
+    const fmt = { type: 'custom', formatter: eqPct, minMove: 0.0001 };
+    sig.series.exposure = ch.addHistogramSeries({
+      priceScaleId: 'exp', color: 'rgba(255,184,58,0.28)', priceFormat: { type: 'percent' },
+      lastValueVisible: false, priceLineVisible: false,
+    });
+    ch.priceScale('exp').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 }, visible: false });
+    sig.series.buy_hold = ch.addLineSeries({ color: 'rgba(111,255,90,0.75)', lineWidth: 1, priceFormat: fmt, priceLineVisible: false });
+    sig.series.constant = ch.addLineSeries({ color: 'rgba(243,235,212,0.55)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, priceFormat: fmt, priceLineVisible: false });
+    sig.series.risk_budget = ch.addLineSeries({ color: '#ffd078', lineWidth: 2, priceFormat: fmt });
+    sig.chart = ch;
+    sig.inited = true;
+    ch.subscribeCrosshairMove(function (param) {
+      const bar = $('#crossSig');
+      if (!bar) return;
+      if (!param || !param.time || !param.seriesData) { bar.innerHTML = crossDefault(); return; }
+      const g = function (k) { const d = param.seriesData.get(sig.series[k]); return d ? d.value : null; };
+      const dateStr = new Date(param.time * 1000).toISOString().slice(0, 10);
+      const parts = ['<strong>' + dateStr + '</strong>'];
+      if (g('risk_budget') != null) parts.push('模型 <strong>' + eqPct(g('risk_budget')) + '</strong>');
+      if (g('constant') != null && sig.curves.constant) parts.push('同仓 ' + eqPct(g('constant')));
+      if (g('buy_hold') != null && sig.curves.buy_hold) parts.push('满仓 ' + eqPct(g('buy_hold')));
+      if (g('exposure') != null) parts.push('仓位 ' + Math.round(g('exposure')) + '%');
+      bar.innerHTML = parts.join('  ');
+    });
+    bindResize(ch, el);
+    const fit = $('#btnFitSig');
+    if (fit) fit.onclick = function () { ch.timeScale().fitContent(); };
+    refreshSignalChart();
+  }
+
+  function crossDefault() {
+    const src = sizingSource();
+    if (!src) return '资金曲线 · 历史不足，暂无回测';
+    return '资金曲线 · 对数坐标 · 自 ' + esc(src.s.start) + (src.proxy ? ' · 母股 ' + esc(src.proxy.symbol) : '') +
+      ' · 收盘调仓 · 成本 ' + ((model().validation || {}).cost_bps || 10) + 'bp';
+  }
+
+  function refreshSignalChart() {
+    if (!sig.chart) return;
+    const src = sizingSource();
+    const keys = ['risk_budget', 'constant', 'buy_hold'];
+    if (!src) {
+      keys.concat(['exposure']).forEach(function (k) { sig.series[k].setData([]); });
+      $('#crossSig').innerHTML = crossDefault();
+      return;
+    }
+    const c = src.s.curve;
+    const times = c.dates.map(toUnix);
+    keys.forEach(function (k) {
+      const on = k === 'risk_budget' || sig.curves[k];
+      sig.series[k].setData(on ? c[k].map(function (v, j) { return { time: times[j], value: v }; }) : []);
+    });
+    sig.series.exposure.setData(c.exposure.map(function (v, j) { return { time: times[j], value: v * 100 }; }));
+    sig.chart.timeScale().fitContent();
+    $('#crossSig').innerHTML = crossDefault();
+  }
+
+  function renderSigMetrics() {
+    const el = $('#sigMetrics');
+    const src = sizingSource();
+    if (!src) { el.innerHTML = ''; return; }
+    const m = src.s.metrics;
+    const row = function (lab, x, cls) {
+      if (!x) return '';
+      return '<tr class="' + (cls || '') + '"><th>' + lab + '</th><td>' + pct(x.cagr, 1) + '</td><td>' + pct(x.vol, 1) +
+        '</td><td>' + Number(x.sharpe).toFixed(2) + '</td><td class="neg">' + pct(x.max_dd, 1) + '</td><td>' +
+        pct(x.avg_exposure, 0) + '</td></tr>';
+    };
+    el.innerHTML = '<table class="mt"><thead><tr><th>' + (src.proxy ? '母股 ' + esc(src.proxy.symbol) : '回测 ' + (m.risk_budget.years || '') + ' 年') +
+      '</th><th>年化</th><th>波动</th><th>夏普</th><th>最大回撤</th><th>平均仓位</th></tr></thead><tbody>' +
+      row('风险预算仓位', m.risk_budget, 'hl') + row('同仓固定', m.constant) + row('满仓持有', m.buy_hold) + '</tbody></table>';
+  }
+
+  function sizeOf(card, key) { return ((card.sizes || {})[key] || {}).size; }
+
+  function renderSignalRail() {
+    const m = model();
+    const rail = $('#view-signal .rail');
+    if (!m || !m.card) {
+      rail.innerHTML = '<div class="rail-h">今日信号</div><div class="warn">此数据文件不含模型输出（旧版 data.json）。</div>';
+      return;
+    }
+    const card = m.card;
+    const cur = DATA.currency || 'USD';
+    $('#sigDate').textContent = card.date + ' 收盘后 · 下一交易日执行';
+
+    const warn = [];
+    if ((m.history_days || 0) < 252) {
+      warn.push('上市仅 ' + m.history_days + ' 个交易日：波动预测与统计样本都不足，仓位只按已有波动估算。' +
+        (m.proxy ? '下方附母股 ' + esc(m.proxy.symbol) + ' 的长期参考。' : ''));
+    } else if (m.history_days < 504) {
+      warn.push('历史约 ' + (m.history_days / 252).toFixed(1) + ' 年，统计区间短，结论稳定性有限。');
+    }
+    $('#sigWarn').innerHTML = warn.map(function (w) { return '<div class="warn">' + w + '</div>'; }).join('');
+
+    const prof = (m.profiles || []).filter(function (p) { return p.key === sig.profile; })[0] || {};
+    const size = sizeOf(card, sig.profile);
+    $('#sigSize').innerHTML =
+      '<div class="big"><span class="num">' + (size == null ? '—' : Math.round(size * 100) + '%') + '</span>' +
+      '<span class="cap">占总资金 · ' + esc(prof.label || '') + '</span></div>' +
+      '<div class="kpi-strip three">' + (m.profiles || []).map(function (p) {
+        const s = sizeOf(card, p.key);
+        return '<button type="button" class="cell pick' + (p.key === sig.profile ? ' on' : '') + '" data-profile="' + p.key + '">' +
+          '<div class="lab">' + esc(p.label) + ' ' + Math.round(p.budget * 100) + '%</div>' +
+          '<div class="val">' + (s == null ? '—' : Math.round(s * 100) + '%') + '</div></button>';
+      }).join('') + '</div>' +
+      '<p class="note">仓位 = 波动预算 ÷ 预测波动。当前预测年化波动 <b>' + pct(card.vol_forecast, 1) +
+      '</b>；预算 ' + pct(prof.budget, 0) + ' 表示这只股票每年给组合带来约 ' + pct(prof.budget, 0) + ' 的波动。' +
+      profileDD(m) + '</p>';
+
+    renderCash(card, size, cur);
+    renderTiming(m, card);
+    renderRisk(card, cur);
+    renderProxy(m);
+    renderCheck(m);
+    $('#sigDef').textContent = '仅基于历史价格的统计参考，不构成投资建议。模型不预测涨跌方向，只把可承受的风险换算成仓位；请结合基本面与自身情况决策。';
+
+    rail.querySelectorAll('[data-profile]').forEach(function (b) { b.onclick = function () { setProfile(b.getAttribute('data-profile')); }; });
+  }
+
+  function profileDD(m) {
+    const v = ((m.validation || {}).sizing || {})[sig.profile];
+    if (!v) return '';
+    return ' 在 ' + v.n_symbols + ' 只同类股票上按此规则回测，单票最大回撤中位 <b class="neg">' + pct(v.max_dd_median, 0) +
+      '</b>，最差 <b class="neg">' + pct(v.max_dd_worst, 0) + '</b>（以总资金计）。';
+  }
+
+  function renderCash(card, size, cur) {
+    let cap = 100000;
+    try { cap = Number(localStorage.getItem('levels.capital')) || cap; } catch (e) { /* */ }
+    const el = $('#sigCash');
+    el.innerHTML = '<label class="cash"><span>总资金</span><input type="number" min="0" step="1000" id="sigCapital" value="' + cap + '" inputmode="numeric" /></label>' +
+      '<div class="cash-out" id="sigCashOut"></div>';
+    const out = function () {
+      const v = Number($('#sigCapital').value) || 0;
+      try { localStorage.setItem('levels.capital', String(v)); } catch (e) { /* */ }
+      if (size == null) { $('#sigCashOut').textContent = '—'; return; }
+      const amt = v * size;
+      const sh = Math.floor(amt / card.close);
+      $('#sigCashOut').innerHTML = '目标持仓 <b>' + fmtMoney(amt, cur) + '</b> ≈ <b>' + sh.toLocaleString('en-US') + '</b> 股 @ ' +
+        card.close.toFixed(2) + '<br><span class="muted">与现有持仓相差不足总资金 5% 时不必调仓。</span>';
+    };
+    $('#sigCapital').addEventListener('input', out);
+    out();
+  }
+
+  function timingHtml(t, m, ownCal) {
+    if (!t) return '<div class="muted pad">特征不足（需约 70 个交易日）</div>';
+    const th = ((m.validation || {}).score_thresholds) || [];
+    const posOf = function (s) { return ((Math.max(-1, Math.min(1, s)) + 1) / 2 * 100).toFixed(1); };
+    const pooled = (((m.validation || {}).score_calibration || {}).all || []);
+    const q = pooled[t.quintile - 1] || {};
+    const allN = pooled.reduce(function (a, b) { return a + (b.n || 0); }, 0);
+    const allMean = allN ? pooled.reduce(function (a, b) { return a + (b.r10_mean || 0) * (b.n || 0); }, 0) / allN : null;
+    const own = ownCal && ownCal.all ? ownCal.all[t.quintile - 1] : null;
+    return '<div class="tm"><div class="tm-l q' + t.quintile + '">' + esc(t.label) + '</div>' +
+      '<div class="tm-s">分 ' + (t.score >= 0 ? '+' : '') + t.score.toFixed(2) + ' · 第 ' + t.quintile + '/5 档</div></div>' +
+      '<div class="gauge">' + th.map(function (x) { return '<i class="tick" style="left:' + posOf(x) + '%"></i>'; }).join('') +
+      '<b class="dot" style="left:' + posOf(t.score) + '%"></b></div>' +
+      '<div class="gauge-l"><span>偏贵</span><span>有利</span></div>' +
+      '<div class="parts">' + (t.parts || []).map(function (p) {
+        const w = Math.min(50, Math.abs(p.contrib) * 100);
+        return '<div class="part" title="' + esc(p.hint) + '"><span class="nm">' + esc(p.label) + '</span>' +
+          '<span class="pb"><i class="' + (p.contrib >= 0 ? 'p' : 'n') + '" style="width:' + w.toFixed(1) + '%"></i></span>' +
+          '<span class="v ' + clsRet(p.contrib) + '">' + (p.contrib >= 0 ? '+' : '') + p.contrib.toFixed(2) + '</span></div>';
+      }).join('') + '</div>' +
+      '<p class="note">历史同档（' + ((m.validation || {}).universe || []).length + ' 只股票合并）：之后 10 日平均 <b class="' + clsRet(q.r10_mean) + '">' +
+      pctPts(q.r10_mean, 2) + '</b>，上涨概率 ' + pct(q.win) + '，n=' + (q.n || 0) + '；全部日子平均 ' + pctPts(allMean, 2) + '。' +
+      (own && own.n ? ' 本股同档：' + pctPts(own.r10_mean, 2) + '，n=' + own.n + '。' : '') + '</p>';
+  }
+
+  function renderTiming(m, card) {
+    const v = (m.validation || {}).verdict || {};
+    $('#sigTiming').innerHTML = timingHtml(card.timing, m, m.score_calibration) +
+      '<p class="note dim">用法：决定好总仓位后，在"有利"档分批买入、"偏贵"档暂缓追高。' +
+      (v.tilt_adds_value ? '' : '回测中把它直接叠加到仓位上并没有提高夏普，所以它不改变上面的建议仓位。') + '</p>';
+  }
+
+  function renderRisk(card, cur) {
+    const r = card.regime || {};
+    const rows = [];
+    rows.push(['趋势', '<span class="' + (r.trend === 'up' ? 'pos' : (r.trend === 'down' ? 'neg' : 'muted')) + '">' + esc(r.trend_zh || '—') + '</span>' +
+      (r.sma50_slope_20d != null ? ' <span class="muted">SMA50 20日 ' + pctPts(r.sma50_slope_20d * 100, 1) + '</span>' : '')]);
+    rows.push(['波动', esc(r.vol_zh || '—') + (r.vol_pctile != null ? ' <span class="muted">近1年分位 ' + pct(r.vol_pctile) + '</span>' : '')]);
+    if (card.risk_line) {
+      const broken = card.risk_line.price > card.close;
+      rows.push(['风控线', '<b>' + card.risk_line.price.toFixed(2) + '</b> ' +
+        (broken ? '<span class="neg">已跌破</span>' : '<span class="neg">' + pctPts(card.risk_line.dist_pct, 1) + '</span>') +
+        '<div class="muted sm">' + esc(card.risk_line.def) + '。' +
+        (broken ? '收盘已在线下：近期下跌超出常态波动，先复核持仓逻辑再考虑加仓。' : '收盘跌破 = 波动已超出常态，复核持仓逻辑。') + '</div>']);
+    }
+    if (card.next_support) {
+      rows.push(['下方支撑', '<b>' + card.next_support.price.toFixed(2) + '</b> <span class="neg">' + pctPts(card.next_support.dist_pct, 1) + '</span>' +
+        '<div class="muted sm">' + esc(card.next_support.role.split('；')[0]) + '</div>']);
+    }
+    if (card.next_resistance) {
+      rows.push(['上方压力', '<b>' + card.next_resistance.price.toFixed(2) + '</b> <span class="pos">' + pctPts(card.next_resistance.dist_pct, 1) + '</span>' +
+        '<div class="muted sm">' + esc(card.next_resistance.role.split('；')[0]) + '</div>']);
+    }
+    $('#sigRisk').innerHTML = '<dl class="kv">' + rows.map(function (x) { return '<dt>' + x[0] + '</dt><dd>' + x[1] + '</dd>'; }).join('') + '</dl>';
+  }
+
+  function renderProxy(m) {
+    const sec = $('#sigProxySec');
+    if (!m.proxy) { sec.hidden = true; return; }
+    sec.hidden = false;
+    const p = m.proxy;
+    const c = p.card || {};
+    const r = c.regime || {};
+    $('#sigProxy').innerHTML = '<p class="note">' + esc(p.name) + '（' + esc(p.symbol) + '，' + (p.history_days / 252).toFixed(0) +
+      ' 年历史，' + esc(p.currency) + '）。同一家公司，走势高度相关，可作长期参考。</p>' +
+      '<dl class="kv"><dt>趋势</dt><dd>' + esc(r.trend_zh || '—') + '</dd><dt>波动</dt><dd>' + esc(r.vol_zh || '—') + ' · 预测 ' + pct(c.vol_forecast, 0) +
+      '</dd><dt>时机</dt><dd>' + esc((c.timing || {}).label || '—') + '</dd><dt>建议仓位</dt><dd>' + (sizeOf(c, sig.profile) == null ? '—' : Math.round(sizeOf(c, sig.profile) * 100) + '%') +
+      ' <span class="muted">按母股波动</span></dd></dl>';
+  }
+
+  function renderCheck(m) {
+    const v = m.validation;
+    if (!v) { $('#sigCheck').innerHTML = ''; return; }
+    const vd = v.verdict || {};
+    const sz = (v.sizing || {})[sig.profile] || {};
+    const t = v.tilt || {};
+    const rd = v.ridge || {};
+    const per = (v.score_calibration || {}).by_period || {};
+    const item = function (ok, title, body) {
+      return '<div class="chk"><span class="mk ' + (ok ? 'ok' : 'no') + '">' + (ok ? '✓' : '✗') + '</span><div><div class="t">' + title +
+        '</div><div class="b">' + body + '</div></div></div>';
+    };
+    const volOk = sz.realised_vol_median != null && Math.abs(sz.realised_vol_median - sz.budget) < 0.02;
+    $('#sigCheck').innerHTML =
+      item(volOk, '风险预算仓位：波动可控 · 采用',
+        sz.n_symbols + ' 只股票回测，实际波动中位 ' + pct(sz.realised_vol_median, 1) + '（目标 ' + pct(sz.budget, 0) + '）。夏普 ' +
+        Number(sz.sharpe_avg).toFixed(2) + '，同仓固定 ' + Number(sz.const_sharpe_avg).toFixed(2) + '：它管风险，不承诺超额收益。') +
+      item(vd.score_stable, '时机分：分期方向一致 · 仅作参考',
+        '最高档减最低档的 10 日风险调整收益：' + Object.keys(per).map(function (k) {
+          return k + ' ' + (per[k].spread_y >= 0 ? '+' : '') + Number(per[k].spread_y).toFixed(2);
+        }).join('，') + '。叠加到仓位后夏普 ' + Number(t.tilt_sharpe_avg).toFixed(2) + ' 对 ' + Number(t.base_sharpe_avg).toFixed(2) +
+        '，换手 ' + Number(t.tilt_turnover_avg).toFixed(1) + '× 对 ' + Number(t.base_turnover_avg).toFixed(1) + '×/年。') +
+      item(vd.ridge_useful, '11 因子回归择时：' + (vd.ridge_useful ? '有效' : '无效 · 未采用'),
+        '滚动样本外 IC ' + (rd.oos_ic != null ? rd.oos_ic.toFixed(3) : '—') + '（' + Object.keys(rd.ic_by_period || {}).map(function (k) {
+          return k + ' ' + rd.ic_by_period[k].toFixed(3);
+        }).join('，') + '）。趋势、动量类因子在不同时期方向翻转。') +
+      '<p class="note dim">股票池 ' + (v.universe || []).length + ' 只半导体 / AI 基建股及 SMH、QQQ；单边成本 ' + v.cost_bps +
+      'bp；收盘价调仓假设。每个交易日随数据刷新重算。</p>';
+  }
+
+  function setProfile(key) {
+    sig.profile = key;
+    try { localStorage.setItem('levels.profile', key); } catch (e) { /* */ }
+    syncSignalButtons();
+    renderSignalRail();
+    renderSigMetrics();
+    refreshSignalChart();
+  }
+
+  function syncSignalButtons() {
+    document.querySelectorAll('#view-signal .tool [data-profile]').forEach(function (btn) {
+      btn.classList.toggle('on', btn.getAttribute('data-profile') === sig.profile);
+    });
+    document.querySelectorAll('[data-curve]').forEach(function (btn) {
+      btn.classList.toggle('on', !!sig.curves[btn.getAttribute('data-curve')]);
+    });
+  }
+
+  function bindSignalControls() {
+    document.querySelectorAll('#view-signal .tool [data-profile]').forEach(function (btn) {
+      btn.addEventListener('click', function () { setProfile(btn.getAttribute('data-profile')); });
+    });
+    document.querySelectorAll('[data-curve]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const k = btn.getAttribute('data-curve');
+        sig.curves[k] = !sig.curves[k];
+        syncSignalButtons();
+        refreshSignalChart();
+      });
+    });
+  }
+
   /* —— filters / views —— */
   function syncPresetButtons() {
     document.querySelectorAll('[data-preset]').forEach(function (btn) {
@@ -1357,10 +1729,15 @@
     });
     const stamp = document.querySelector('.stamp');
     if (stamp) {
-      stamp.textContent = ({ observe: '观察', levels: '点位', hold: '触及', break: '突破', playback: '回测' })[id] || id;
+      stamp.textContent = ({ signal: '信号', observe: '观察', levels: '点位', hold: '触及', break: '突破', playback: '回测' })[id] || id;
     }
+    if (history.replaceState) history.replaceState(null, '', location.search + '#' + id);
     if (id !== 'playback') stopPlayback();
-    if (id === 'observe') {
+    if (id === 'signal') {
+      initSignalChart();
+      requestAnimationFrame(function () { ensureChartSized('signal'); });
+    } else if (id === 'observe') {
+      if (!chart) buildChart();
       requestAnimationFrame(function () { ensureChartSized(); });
     } else if (id === 'levels') {
       initLevelsChart();
@@ -1394,17 +1771,23 @@
     }
     profileCache = null;
     renderHeader();
-    buildChart();
+    loadPrefs();
+    renderSignalRail();
+    renderSigMetrics();
     renderObsAccuracy();
     renderLevelsLadder();
     renderHoldRail();
     renderBreakRail();
     syncPresetButtons();
     syncPlayLayerButtons();
+    syncSignalButtons();
     bindFilters();
     bindPlaybackControls();
+    bindSignalControls();
     bindViews();
-    switchView('observe');
+    const hash = (location.hash || '').replace('#', '');
+    const start = VIEWS.indexOf(hash) >= 0 ? hash : (model() ? 'signal' : 'observe');
+    switchView(start);
   }
 
   if (document.readyState === 'loading') {
