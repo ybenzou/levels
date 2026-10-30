@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <title>AVGO 日线关键价位</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <script src="https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="./fallback-data.js"></script>
+</head>
+<body>
+  <div class="wrap" id="app">
+    <header class="app">
+      <div>
+        <h1 id="title">AVGO 日线关键价位</h1>
+        <div class="meta" id="asof">加载中…</div>
+        <div class="meta" id="gen"></div>
+      </div>
+      <div class="pill">多指标交汇 · 日线参考</div>
+    </header>
+
+    <div class="disclaimer">描述性统计，非交易建议。关键位来自均线/布林/VRVP/Fib/摆动等交汇，供盘中对照，不构成买卖信号。</div>
+
+    <div class="panel">
+      <h2>市场状态</h2>
+      <div class="state-grid" id="stateGrid"></div>
+    </div>
+
+    <div class="panel">
+      <h2>日 K + 关键价位</h2>
+      <div class="row toggles" id="kindToggles">
+        <button type="button" class="toggle on res" data-kind="resistance">压力</button>
+        <button type="button" class="toggle on sup" data-kind="support">支撑</button>
+        <button type="button" class="toggle on anc" data-kind="anchor">锚点</button>
+        <span class="muted" style="margin-left:6px;font-size:12px">优先级</span>
+        <button type="button" class="toggle on p0" data-pri="0">现价</button>
+        <button type="button" class="toggle on p1" data-pri="1">高优</button>
+        <button type="button" class="toggle on" data-pri="2">中优</button>
+        <button type="button" class="toggle" data-pri="3">低优</button>
+      </div>
+      <div id="chart" role="img" aria-label="AVGO 日线蜡烛图与关键价位"></div>
+      <div class="chart-hint">双指缩放 / 拖动平移 · 横线=筛选后的关键价位（默认隐藏低优）</div>
+    </div>
+
+    <div class="panel">
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab active" data-tab="levels">今日点位</button>
+        <button type="button" class="tab" data-tab="hold">触及命中</button>
+        <button type="button" class="tab" data-tab="break">突破收益</button>
+      </div>
+
+      <div class="tab-pane active" id="pane-levels">
+        <h2>价位表</h2>
+        <div id="levelsTable"></div>
+        <h2 style="margin-top:14px">关键带</h2>
+        <div id="bandsTable"></div>
+      </div>
+
+      <div class="tab-pane" id="pane-hold">
+        <p class="def" id="holdDef"></p>
+        <div class="kpi" id="holdKpi"></div>
+        <h2>分族守住率</h2>
+        <div id="holdTable"></div>
+      </div>
+
+      <div class="tab-pane" id="pane-break">
+        <p class="def" id="breakDef"></p>
+        <div class="kpi" id="breakKpi"></div>
+        <h2>分族突破后 +5 日收益</h2>
+        <div id="breakTable"></div>
+        <div id="breakExamples"></div>
+      </div>
+    </div>
+
+    <footer>AVGO Levels · 静态页 · data.json 同目录刷新 · 描述性统计，非交易建议</footer>
+  </div>
+  <script src="./app.js"></script>
+</body>
+</html>
