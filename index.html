@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="dark" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>AVGO 日线关键价位</title>
   <link rel="stylesheet" href="./styles.css" />
   <script src="https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
@@ -12,66 +13,95 @@
 <body>
   <div class="wrap" id="app">
     <header class="app">
-      <div>
+      <div class="head-main">
         <h1 id="title">AVGO 日线关键价位</h1>
         <div class="meta" id="asof">加载中…</div>
-        <div class="meta" id="gen"></div>
       </div>
-      <div class="pill">多指标交汇 · 日线参考</div>
+      <div class="pill" id="lastPill">观察模式</div>
     </header>
 
-    <div class="disclaimer">描述性统计，非交易建议。关键位来自均线/布林/VRVP/Fib/摆动等交汇，供盘中对照，不构成买卖信号。</div>
+    <div class="disclaimer">描述性统计，非交易建议。关键位供盘中对照，不构成买卖信号。</div>
 
-    <div class="panel">
-      <h2>市场状态</h2>
-      <div class="state-grid" id="stateGrid"></div>
-    </div>
+    <nav class="main-tabs" role="tablist" aria-label="主视图">
+      <button type="button" class="mtab active" data-view="observe">观察模式</button>
+      <button type="button" class="mtab" data-view="levels">今日点位</button>
+      <button type="button" class="mtab" data-view="hold">触及命中</button>
+      <button type="button" class="mtab" data-view="break">突破收益</button>
+    </nav>
 
-    <div class="panel">
-      <h2>日 K + 关键价位</h2>
-      <div class="row toggles" id="kindToggles">
-        <button type="button" class="toggle on res" data-kind="resistance">压力</button>
-        <button type="button" class="toggle on sup" data-kind="support">支撑</button>
-        <button type="button" class="toggle on anc" data-kind="anchor">锚点</button>
-        <span class="muted" style="margin-left:6px;font-size:12px">优先级</span>
-        <button type="button" class="toggle on p0" data-pri="0">现价</button>
-        <button type="button" class="toggle on p1" data-pri="1">高优</button>
-        <button type="button" class="toggle on" data-pri="2">中优</button>
-        <button type="button" class="toggle" data-pri="3">低优</button>
+    <!-- 观察模式：K线 + 同屏回测准确率 -->
+    <section class="view active" id="view-observe" aria-label="观察模式">
+      <div class="observe-layout">
+        <div class="chart-col">
+          <div class="toolbar">
+            <div class="toggles" id="presetToggles" role="group" aria-label="价位筛选">
+              <button type="button" class="toggle" data-preset="all">全部</button>
+              <button type="button" class="toggle on" data-preset="priority">优先</button>
+              <button type="button" class="toggle" data-preset="near5">±5%</button>
+              <button type="button" class="toggle on res" data-kind="resistance">压力</button>
+              <button type="button" class="toggle on sup" data-kind="support">支撑</button>
+              <button type="button" class="toggle on anc" data-kind="anchor">锚点</button>
+            </div>
+            <div class="chart-actions">
+              <button type="button" class="ghost" id="btnFit" title="适配全部">适配</button>
+            </div>
+          </div>
+          <div id="chart" role="img" aria-label="AVGO 日线蜡烛图与关键价位"></div>
+          <div class="chart-hint">双指缩放 · 拖动平移 · 十字线看价 · 横线=关键位</div>
+          <div class="crosshair-bar" id="crossBar">—</div>
+        </div>
+
+        <aside class="acc-col" aria-label="回测准确率">
+          <h2>回测准确率</h2>
+          <p class="def tiny" id="accWindow"></p>
+          <div class="acc-block">
+            <div class="acc-title">触及守住</div>
+            <div class="kpi compact" id="obsHoldKpi"></div>
+          </div>
+          <div class="acc-block">
+            <div class="acc-title">命中率靠前族</div>
+            <div id="obsTopFamilies"></div>
+          </div>
+          <div class="acc-block">
+            <div class="acc-title">突破后收益</div>
+            <div class="kpi compact" id="obsBreakKpi"></div>
+          </div>
+          <p class="def tiny">完整定义见「触及命中 / 突破收益」页签。</p>
+        </aside>
       </div>
-      <div id="chart" role="img" aria-label="AVGO 日线蜡烛图与关键价位"></div>
-      <div class="chart-hint">双指缩放 / 拖动平移 · 横线=筛选后的关键价位（默认隐藏低优）</div>
-    </div>
+    </section>
 
-    <div class="panel">
-      <div class="tabs" role="tablist">
-        <button type="button" class="tab active" data-tab="levels">今日点位</button>
-        <button type="button" class="tab" data-tab="hold">触及命中</button>
-        <button type="button" class="tab" data-tab="break">突破收益</button>
+    <section class="view" id="view-levels" hidden>
+      <div class="panel">
+        <h2>市场状态</h2>
+        <div class="state-grid" id="stateGrid"></div>
       </div>
-
-      <div class="tab-pane active" id="pane-levels">
+      <div class="panel">
         <h2>价位表</h2>
         <div id="levelsTable"></div>
         <h2 style="margin-top:14px">关键带</h2>
         <div id="bandsTable"></div>
       </div>
+    </section>
 
-      <div class="tab-pane" id="pane-hold">
+    <section class="view" id="view-hold" hidden>
+      <div class="panel">
         <p class="def" id="holdDef"></p>
         <div class="kpi" id="holdKpi"></div>
         <h2>分族守住率</h2>
         <div id="holdTable"></div>
       </div>
+    </section>
 
-      <div class="tab-pane" id="pane-break">
+    <section class="view" id="view-break" hidden>
+      <div class="panel">
         <p class="def" id="breakDef"></p>
         <div class="kpi" id="breakKpi"></div>
         <h2>分族突破后 +5 日收益</h2>
         <div id="breakTable"></div>
         <div id="breakExamples"></div>
       </div>
-    </div>
+    </section>
 
     <footer>AVGO Levels · 静态页 · data.json 同目录刷新 · 描述性统计，非交易建议</footer>
   </div>
