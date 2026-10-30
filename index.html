@@ -43,10 +43,15 @@
               <button type="button" class="tog on res" data-kind="resistance">压力</button>
               <button type="button" class="tog on sup" data-kind="support">支撑</button>
               <button type="button" class="tog on anc" data-kind="anchor">锚点</button>
+              <span class="sep"></span>
+              <button type="button" class="tog on" data-vrvp="1" id="btnVrvp" title="价值区 / 成交量剖面">VRVP</button>
             </div>
             <button type="button" class="tog ghost" id="btnFit">适配</button>
           </div>
-          <div id="chart" role="img" aria-label="AVGO 日K与关键价位"></div>
+          <div class="chart-stack">
+            <div id="chart" role="img" aria-label="AVGO 日K与关键价位"></div>
+            <canvas id="vrvpOverlay" aria-hidden="true"></canvas>
+          </div>
           <div class="chart-foot">
             <div class="ohlc" id="crossBar">—</div>
             <div class="legend" id="levelLegend"></div>
@@ -71,33 +76,59 @@
     </section>
 
     <section class="view" id="view-levels" hidden>
-      <div class="band" id="stateGrid"></div>
-      <div class="block">
-        <div class="block-h">价位</div>
-        <div id="levelsTable"></div>
-      </div>
-      <div class="block">
-        <div class="block-h">关键带</div>
-        <div id="bandsTable"></div>
+      <div class="viz-shell">
+        <div class="viz-row">
+          <div class="viz-pane grow">
+            <div class="block-h tight">价位阶梯</div>
+            <div id="levelsLadder" class="ladder"></div>
+          </div>
+          <div class="viz-pane profile-pane">
+            <div class="block-h tight">VRVP 分层</div>
+            <canvas id="levelsProfile" width="160" height="420"></canvas>
+            <div class="profile-meta" id="levelsProfileMeta"></div>
+          </div>
+        </div>
+        <div class="viz-row bands-row">
+          <div class="viz-pane grow">
+            <div class="block-h tight">关键带</div>
+            <div id="bandsViz" class="bands-viz"></div>
+          </div>
+        </div>
       </div>
     </section>
 
     <section class="view" id="view-hold" hidden>
-      <div class="block">
-        <p class="def" id="holdDef"></p>
-        <div id="holdKpi" class="kpi-strip wide"></div>
-        <div class="block-h">分族</div>
-        <div id="holdTable"></div>
+      <div class="viz-shell">
+        <div class="kpi-strip wide" id="holdKpi"></div>
+        <div class="viz-row split">
+          <div class="viz-pane grow">
+            <div class="block-h tight">分族守住率</div>
+            <div id="holdChart" class="hbar-chart"></div>
+          </div>
+          <div class="viz-pane side">
+            <div class="block-h tight">定义</div>
+            <p class="def tight" id="holdDef"></p>
+            <div id="holdSideSplit" class="side-split"></div>
+          </div>
+        </div>
       </div>
     </section>
 
     <section class="view" id="view-break" hidden>
-      <div class="block">
-        <p class="def" id="breakDef"></p>
-        <div id="breakKpi" class="kpi-grid wide"></div>
-        <div class="block-h">分族 +5d</div>
-        <div id="breakTable"></div>
-        <div id="breakExamples"></div>
+      <div class="viz-shell">
+        <div class="block-h tight">突破后收益分布</div>
+        <div id="breakHorizon" class="horizon-grid"></div>
+        <div class="viz-row split">
+          <div class="viz-pane grow">
+            <div class="block-h tight">分族 +5d 中位 · 四分位</div>
+            <div id="breakChart" class="forest-chart"></div>
+          </div>
+          <div class="viz-pane side">
+            <div class="block-h tight">定义</div>
+            <p class="def tight" id="breakDef"></p>
+            <div id="breakKpi" class="kpi-grid compact"></div>
+          </div>
+        </div>
       </div>
     </section>
   </div>
