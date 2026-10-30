@@ -11,7 +11,7 @@ Public GitHub Pages, static files only. Statistical reference, not investment ad
 | Tab | What it answers |
 | --- | --- |
 | 信号 | How much to hold today for a chosen risk level, whether today is a better or worse day to add, and how the sizing rule did historically. |
-| 观察 | The last 1 / 2 / 3 months (switch top-right). Every line on the chart, and every band between two lines, is explained in plain words on the right: what it is, how to read it, and how it behaved in 10 years × 19 symbols. |
+| 观察 | The last 1 / 2 / 3 months (switch top-right). The model picks the key support / resistance prices from price structure (R1/R2…, S1/S2…), explains why each one matters, gives the odds of reaching it within 10 days and of a 1-ATR reaction once touched, and turns the band the price sits in into a plan (where to watch, where it fails, what's next). Indicator lines (MA, Bollinger, 20-day high/low) are an optional "参考线" overlay. |
 | 点位 | The full level ladder (MA, Bollinger, Donchian, VRVP, Fib, gaps, swings, pivots). |
 | 触及 / 突破 | Did touches hold / did breakouts follow through — over the full history, with 95% intervals and a placebo baseline. |
 | 回测 | Replay the last year bar by bar with the touch / breakout events. |
@@ -22,7 +22,15 @@ Public GitHub Pages, static files only. Statistical reference, not investment ad
 2. **Timing score (weak tilt).** Equal-weight blend of short-term reversal (5-day move, distance below SMA20, RSI(2)) and the low-volatility effect. No fitted coefficients. Shown with its pooled calibration; used for pacing adds, it does not change the recommended size.
 3. **Regime + risk lines.** Trend (SMA50/200), volatility percentile, chandelier line (22-day high close − 3×ATR14), nearest priority-1 support / resistance.
 
-**观察 lines (`pipeline/observe.py`).** Line positions use only the chosen window (window high/low, volume profile POC/VAH/VAL, swing highs/lows, unfilled gaps) plus today's SMA20/50/200, Bollinger bands and 20-day high/low. Lines within 0.4% are merged. Each band between neighbouring lines is tagged by where it sits relative to the value area, its volume density, and whether it lies outside the Bollinger bands. Statistics are learned on the full history, never on the window: touch→hold rates pooled across all 19 symbols against a shifted-line placebo, and, for the band the price is in, which line real price paths reached first within 10 days (distances in ATR, same SMA200 regime).
+**观察 key levels (`pipeline/keylevels.py`, `pipeline/observe.py`).**
+
+- *Where.* Candidate prices are the window's swing pivots (3 bars each side); candidates within 0.3 ATR are merged into one zone. Each zone gets a structural score: how many pivots formed there (capped at 4), whether it is also a 1-year major pivot (10 bars each side), whether it is the window high/low, role reversal (was support, now resistance or vice versa), pivot volume ≥ 1.5× the 20-day average, and the largest move that started there. The top 3 per side with score ≥ 1, at least 1 ATR apart, become R1/R2/R3 and S1/S2/S3. Salience 高/中/低 comes from the score.
+- *Odds.* Two pooled logistic models (19 symbols × 10 years, sampled every 3 days, ridge-penalised) on the level's context: ATR distance, side, with/against the SMA200 trend, SMA50 slope, position in the 1-year range. *Reach* = touched within 10 days. *React* = after a touch, price moves 1 ATR away before closing 0.5 ATR through it within 10 days.
+- *Honest check (out of sample, trained before 2022, tested after).* Reach AUC ≈ 0.85 and well calibrated by decile. React AUC ≈ 0.54, only a rough guide. Residual edge over the context model: structural levels −1.0 pp (support) / +1.3 pp (resistance); MA/Bollinger/Donchian lines and random prices at the same distance land within about ±1 pp. Neither structural nor indicator levels hold better per se; what matters is distance and trend. The levels are for planning (what to watch, where an idea fails, the next target), not a promise that a line holds. The full table is in the 观察 rail under 模型体检.
+
+The chart draws key levels as solid lines (thicker means more salient) with a ±0.3 ATR band. Bands between lines show the price's current zone and how often paths reached the upper vs lower line first within 10 days.
+
+Rendering note: the CRT look uses a colour-only CSS filter on the candle canvas and no blend-mode overlays. Drop-shadow filters and `mix-blend-mode` made every crosshair repaint re-rasterise the page (~900 ms/frame); it now holds 60 fps (p50 16.7 ms).
 
 Every build re-runs the validation and publishes it (信号 → 模型体检):
 

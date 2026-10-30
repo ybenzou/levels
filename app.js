@@ -324,39 +324,40 @@
     });
   }
 
-  /* —— 观察：近 1/2/3 月窗口 · 每条线和每个区间的含义 —— */
-  const obs = { win: '3m', hot: -1, hotZone: -1 };
+  /* —— 观察：近 1/2/3 月窗口 · 模型判断的关键位 + 可选参考线 —— */
+  const obs = { win: '3m', hot: null, hotZone: null, ref: false };
+  let obsLines = [];
   const AUTOSCALE_PCT = 12;
   const GROUP_STYLE = {
-    ma: { style: 0, w: 2, zh: '均线', dash: '' },
+    ma: { style: 0, w: 1, zh: '均线', dash: '' },
     boll: { style: 2, w: 1, zh: '布林', dash: '5 3' },
     range: { style: 3, w: 1, zh: '区间高低', dash: '9 4' },
     vrvp: { style: 0, w: 1, zh: '成交剖面', dash: '' },
     swing: { style: 1, w: 1, zh: '前高/前低', dash: '1.5 2.5' },
     gap: { style: 4, w: 1, zh: '缺口', dash: '1.5 5' },
   };
+  const KEY_W = { high: 3, mid: 2, low: 1 };
 
   function obsData() { return DATA.observe || null; }
   function obsWin() {
     const o = obsData();
     return o ? o.by_window[obs.win] || null : null;
   }
+  function obsKey() { const w = obsWin(); return w ? w.key : null; }
   function winFrom() { const w = obsWin(); return w ? w.from : ''; }
   function winLabel() { const w = obsWin(); return w ? w.label : '近1年'; }
   function loadWinPref() {
     const o = obsData();
     if (!o) return;
-    let saved = null;
-    try { saved = localStorage.getItem('levels.window'); } catch (e) { /* */ }
+    let saved = null, ref = null;
+    try { saved = localStorage.getItem('levels.window'); ref = localStorage.getItem('levels.ref'); } catch (e) { /* */ }
     obs.win = saved && o.by_window[saved] ? saved : o.default;
+    obs.ref = ref === '1';
   }
 
-  function guideColor(ln, hot) {
-    const a = hot ? 1 : 0.78;
-    return ln.kind === 'resistance' ? 'rgba(255,184,58,' + a + ')' : 'rgba(159,212,95,' + a + ')';
-  }
-  function swatch(group, kind) {
-    const st = GROUP_STYLE[group] || GROUP_STYLE.range;
+  function kindRgb(kind) { return kind === 'resistance' ? '255,184,58' : '159,212,95'; }
+  function swatch(group, kind, w) {
+    const st = group === 'key' ? { w: w || 2, dash: '' } : (GROUP_STYLE[group] || GROUP_STYLE.range);
     const col = kind === 'resistance' ? '#ffb83a' : (kind === 'support' ? '#9fd45f' : '#c9bfa4');
     return '<svg class="sw" width="22" height="8" aria-hidden="true"><line x1="0" y1="4" x2="22" y2="4" stroke="' + col +
       '" stroke-width="' + (st.w + 0.5) + '"' + (st.dash ? ' stroke-dasharray="' + st.dash + '"' : '') + '/></svg>';
@@ -367,8 +368,14 @@
     bars.forEach(function (b) { if (b.low < lo) lo = b.low; if (b.high > hi) hi = b.high; });
     return [lo, hi];
   }
-  function inChart(ln, w, rg) {
+  function inChart(ln, rg) {
     return Math.abs(ln.dist_pct) <= AUTOSCALE_PCT || (ln.price >= rg[0] && ln.price <= rg[1]);
+  }
+  function keyName(k, lv) {
+    const lvls = k.levels;
+    const same = lvls.filter(function (x) { return x.kind === lv.kind; })
+      .sort(function (a, b) { return lv.kind === 'resistance' ? a.price - b.price : b.price - a.price; });
+    return (lv.kind === 'resistance' ? '关键压力 R' : '关键支撑 S') + (same.indexOf(lv) + 1);
   }
 
   function scheduleOverlay() {
@@ -406,53 +413,72 @@
       const y1 = yOf(hi), y2 = yOf(lo);
       if (y1 == null || y2 == null) return;
       ctx.fillStyle = fill;
-      ctx.fillRect(0, Math.min(y1, y2), plotW, Math.abs(y2 - y1));
+      ctx.fillRect(0, Math.min(y1, y2), plotW, Math.max(1, Math.abs(y2 - y1)));
       if (stroke) {
         ctx.strokeStyle = stroke;
         ctx.lineWidth = 1;
         ctx.strokeRect(0.5, Math.min(y1, y2) + 0.5, plotW - 1, Math.abs(y2 - y1));
       }
     }
-    win.zones.forEach(function (z, j) {
-      if (j === obs.hotZone) band(z.lo, z.hi, 'rgba(255,208,120,0.13)', 'rgba(255,208,120,0.55)');
-      else if (z.current) band(z.lo, z.hi, 'rgba(243,235,212,0.05)', null);
-    });
-    if (!filters.vrvp) return;
-    const prof = win.profile;
-    if (!prof) return;
-    if (prof.val != null && prof.vah != null) band(prof.val, prof.vah, 'rgba(232,168,56,0.06)', null);
-    const profileW = Math.min(96, Math.max(56, w * 0.14));
-    const x0 = plotW - profileW - 2;
-    for (let i = 0; i < prof.vol.length; i++) {
-      const pLo = prof.lo + i * prof.step;
-      const pHi = pLo + prof.step;
-      const ya = yOf(pHi), yb = yOf(pLo);
-      if (ya == null || yb == null) continue;
-      const top = Math.min(ya, yb);
-      const bh = Math.max(1, Math.abs(yb - ya) - 1);
-      const bw = prof.vol[i] / 1000 * (profileW - 4);
-      const inVA = pLo >= prof.val - 1e-9 && pHi <= prof.vah + 1e-9;
-      ctx.fillStyle = inVA ? 'rgba(232,168,56,0.42)' : 'rgba(154,144,120,0.26)';
-      ctx.fillRect(x0 + (profileW - 4 - bw), top, bw, bh);
+    if (filters.vrvp && win.profile) {
+      const prof = win.profile;
+      if (prof.val != null && prof.vah != null) band(prof.val, prof.vah, 'rgba(232,168,56,0.045)', null);
+      const profileW = Math.min(96, Math.max(56, w * 0.14));
+      const x0 = plotW - profileW - 2;
+      for (let i = 0; i < prof.vol.length; i++) {
+        const pLo = prof.lo + i * prof.step;
+        const pHi = pLo + prof.step;
+        const ya = yOf(pHi), yb = yOf(pLo);
+        if (ya == null || yb == null) continue;
+        const bw = prof.vol[i] / 1000 * (profileW - 4);
+        const inVA = pLo >= prof.val - 1e-9 && pHi <= prof.vah + 1e-9;
+        ctx.fillStyle = inVA ? 'rgba(232,168,56,0.36)' : 'rgba(154,144,120,0.22)';
+        ctx.fillRect(x0 + (profileW - 4 - bw), Math.min(ya, yb), bw, Math.max(1, Math.abs(yb - ya) - 1));
+      }
+    }
+    const k = win.key;
+    if (k) {
+      k.zones.forEach(function (z, j) {
+        if (obs.hotZone === 'k' + j) band(z.lo, z.hi, 'rgba(255,208,120,0.12)', 'rgba(255,208,120,0.55)');
+        else if (z.current) band(z.lo, z.hi, 'rgba(243,235,212,0.04)', null);
+      });
+      k.levels.forEach(function (lv, i) {
+        const a = obs.hot === 'k' + i ? 0.3 : (lv.salience === 'high' ? 0.2 : 0.12);
+        band(lv.lo, lv.hi, 'rgba(' + kindRgb(lv.kind) + ',' + a + ')', null);
+      });
     }
   }
 
-  function applyObsLines() {
-    clearLines(candleSeries, priceLines);
-    const w = obsWin();
-    if (!w || !candleSeries) return;
-    w.lines.forEach(function (ln, i) {
-      const st = GROUP_STYLE[ln.group] || GROUP_STYLE.range;
-      const hot = i === obs.hot;
-      priceLines.push(candleSeries.createPriceLine({
-        price: ln.price, color: guideColor(ln, hot), lineWidth: st.w + (hot ? 2 : 0),
-        lineStyle: st.style, axisLabelVisible: true,
-      }));
-    });
+  function lineSpec(e, hot) {
+    if (e.key) {
+      return { color: 'rgba(' + kindRgb(e.kind) + ',' + (hot ? 1 : 0.92) + ')', lineWidth: (KEY_W[e.strength] || 2) + (hot ? 1 : 0) };
+    }
+    const st = GROUP_STYLE[e.group] || GROUP_STYLE.range;
+    return { color: 'rgba(' + kindRgb(e.kind) + ',' + (hot ? 0.95 : 0.42) + ')', lineWidth: st.w + (hot ? 1 : 0) };
   }
 
-  function lineNames(ln) {
-    return ln.members.map(function (m) { return m.name; }).join(' + ');
+  function applyObsLines() {
+    obsLines.forEach(function (e) { try { candleSeries.removePriceLine(e.handle); } catch (err) { /* */ } });
+    obsLines = [];
+    const w = obsWin();
+    if (!w || !candleSeries) return;
+    const add = function (e, style) {
+      const sp = lineSpec(e, e.id === obs.hot);
+      e.handle = candleSeries.createPriceLine({
+        price: e.price, color: sp.color, lineWidth: sp.lineWidth, lineStyle: style, axisLabelVisible: e.key || obs.ref,
+      });
+      obsLines.push(e);
+    };
+    if (obs.ref) {
+      w.lines.forEach(function (ln, i) {
+        add({ id: 'r' + i, price: ln.price, kind: ln.kind, group: ln.group, key: false }, (GROUP_STYLE[ln.group] || GROUP_STYLE.range).style);
+      });
+    }
+    if (w.key) {
+      w.key.levels.forEach(function (lv, i) {
+        add({ id: 'k' + i, price: lv.price, kind: lv.kind, strength: lv.salience, key: true }, LightweightCharts.LineStyle.Solid);
+      });
+    }
   }
 
   function footHint() {
@@ -460,41 +486,48 @@
     if (!el) return;
     const w = obsWin();
     if (!w) { el.innerHTML = ''; return; }
-    if (obs.hot >= 0 && w.lines[obs.hot]) {
-      const ln = w.lines[obs.hot];
-      const d = (obsData().defs || {})[ln.members[0].key] || {};
-      el.innerHTML = swatch(ln.group, ln.kind) + '<span class="px">' + ln.price.toFixed(2) + '</span> ' +
-        '<b>' + esc(lineNames(ln)) + '</b> <span class="' + (ln.kind === 'resistance' ? 'kind-res' : 'kind-sup') + '">' +
-        pctPts(ln.dist_pct, 1) + '</span> · ' + esc(d.what || '');
+    const o = obsData();
+    const id = obs.hot;
+    if (id && id[0] === 'k' && w.key) {
+      const lv = w.key.levels[Number(id.slice(1))];
+      el.innerHTML = swatch('key', lv.kind, KEY_W[lv.salience]) + '<b>' + keyName(w.key, lv) + '</b> <span class="px">' +
+        lv.price.toFixed(2) + '</span> <span class="' + (lv.kind === 'resistance' ? 'kind-res' : 'kind-sup') + '">' +
+        pctPts(lv.dist_pct, 1) + '</span> · 10 日内碰到 ' + pct(lv.reach) + ' · 碰到后' + (lv.kind === 'resistance' ? '回落' : '反弹') +
+        ' ' + pct(lv.react) + ' · ' + esc(lv.why[0] || '');
       return;
     }
-    if (obs.hotZone >= 0 && w.zones[obs.hotZone]) {
-      const z = w.zones[obs.hotZone];
-      const tags = obsData().zone_tags || {};
+    if (id && id[0] === 'r') {
+      const ln = w.lines[Number(id.slice(1))];
+      const d = (o.defs || {})[ln.members[0].key] || {};
+      el.innerHTML = swatch(ln.group, ln.kind) + '<b>' + esc(ln.members.map(function (m) { return m.name; }).join(' + ')) +
+        '</b> <span class="px">' + ln.price.toFixed(2) + '</span> · ' + esc(d.what || '');
+      return;
+    }
+    if (obs.hotZone && w.key) {
+      const z = w.key.zones[Number(obs.hotZone.slice(1))];
+      const tags = o.zone_tags || {};
       el.innerHTML = '区间 <span class="px">' + z.lo.toFixed(2) + '–' + z.hi.toFixed(2) + '</span> · ' +
-        (z.tags || []).map(function (t) { return esc((tags[t] || {}).label || t); }).join(' · ') +
-        ' · 宽 ' + z.width_pct.toFixed(1) + '%';
+        (z.tags || []).map(function (t) { return esc((tags[t] || {}).label || t); }).join(' · ') + ' · 宽 ' + z.width_pct.toFixed(1) + '%';
       return;
     }
-    el.innerHTML = '<span class="muted">鼠标移到线或区间上，这里显示它代表什么；右侧有完整说明</span>';
+    el.innerHTML = '<span class="muted">实线 = 模型从价格结构里找出的关键位，色带 = ±0.3 ATR 反应区；鼠标移上去看依据和概率</span>';
   }
 
   function setHot(line, zone) {
     if (line === obs.hot && zone === obs.hotZone) return;
-    const w = obsWin();
     const prev = obs.hot;
     obs.hot = line;
     obs.hotZone = zone;
-    [prev, line].forEach(function (i) {
-      if (i < 0 || !w || !w.lines[i] || !priceLines[i]) return;
-      const st = GROUP_STYLE[w.lines[i].group] || GROUP_STYLE.range;
-      priceLines[i].applyOptions({ color: guideColor(w.lines[i], i === line), lineWidth: st.w + (i === line ? 2 : 0) });
+    obsLines.forEach(function (e) {
+      if (e.id !== prev && e.id !== line) return;
+      e.handle.applyOptions(lineSpec(e, e.id === line));
     });
-    document.querySelectorAll('#guideList .gl, #guideList .gz').forEach(function (el) {
-      const li = el.getAttribute('data-li');
-      const zi = el.getAttribute('data-zi');
-      el.classList.toggle('hot', (li != null && Number(li) === line) || (zi != null && Number(zi) === zone));
-    });
+    const list = $('#guideList');
+    if (list) {
+      list.querySelectorAll('.hot').forEach(function (el) { el.classList.remove('hot'); });
+      if (line) { const el = list.querySelector('[data-li="' + line + '"]'); if (el) el.classList.add('hot'); }
+      if (zone) { const el = list.querySelector('[data-zi="' + zone + '"]'); if (el) el.classList.add('hot'); }
+    }
     footHint();
     scheduleOverlay();
   }
@@ -511,37 +544,49 @@
     }
     return '<div class="gl-s"><span class="k">回测</span>碰到后 5 日内' + (s.side === 'support' ? '撑住' : '压住') +
       ' <b>' + pct(p.rate) + '</b> <span class="muted">' + tr.n_symbols + '只×' + tr.years + '年 n=' + p.n +
-      (s.own && s.own.n >= 20 ? ' · 本股 ' + pct(s.own.rate) : '') + ' · 随机线 ' + pct(base) + '</span>' +
-      (vd ? ' <span class="vd ' + cls + '">' + vd + '</span>' : '') + '</div>';
+      ' · 随机线 ' + pct(base) + '</span>' + (vd ? ' <span class="vd ' + cls + '">' + vd + '</span>' : '') + '</div>';
   }
 
-  function lineCard(ln, i, o, rg, w) {
+  function refCard(ln, i, o, rg) {
     const defs = o.defs || {};
     const ms = ln.members;
     const k = ln.kind === 'resistance' ? 'res' : 'sup';
     const names = ms.map(function (m) { return esc(m.name); }).join('<i class="plus">＋</i>');
-    const dist = pctPts(ln.dist_pct, 1) + (ln.atr_dist != null ? ' · ' + Math.abs(ln.atr_dist).toFixed(1) + ' ATR' : '');
-    let body;
-    if (ms.length === 1) {
-      const d = defs[ms[0].key] || {};
-      body = '<div class="gl-w">' + esc(d.what) + '</div><div class="gl-u"><span class="k">怎么看</span>' + esc(d.use) + '</div>';
-    } else {
-      body = ms.map(function (m) {
-        return '<div class="gl-w"><b>' + esc(m.name) + '</b>：' + esc((defs[m.key] || {}).what) + '</div>';
-      }).join('') +
-        '<div class="gl-u"><span class="k">怎么看</span>' + esc((defs[ms[0].key] || {}).use) + '</div>' +
-        '<div class="gl-x">' + ms.length + ' 条线重合在同一价位（相差不到 0.4%），盯着这里的人更多。</div>';
-    }
-    const stats = ms.map(function (m) { return statHtml(m, o.training); }).join('');
-    return '<div class="gl ' + k + '" data-li="' + i + '">' +
+    const body = ms.map(function (m) {
+      const d = defs[m.key] || {};
+      return '<div class="gl-w">' + (ms.length > 1 ? '<b>' + esc(m.name) + '</b>：' : '') + esc(d.what) + '</div>';
+    }).join('') + '<div class="gl-u"><span class="k">怎么看</span>' + esc((defs[ms[0].key] || {}).use) + '</div>';
+    return '<div class="gl ref ' + k + '" data-li="r' + i + '">' +
       '<div class="gl-h">' + swatch(ln.group, ln.kind) + '<b class="px">' + ln.price.toFixed(2) + '</b>' +
-      '<span class="nm">' + names + '</span>' +
-      '<span class="d ' + (k === 'res' ? 'kind-res' : 'kind-sup') + '">' + dist + '</span></div>' +
-      (inChart(ln, w, rg) ? '' : '<div class="gl-off">在图外：离现价太远，图上看不到这条线</div>') +
-      body + stats + '</div>';
+      '<span class="nm">' + names + '</span><span class="d ' + (k === 'res' ? 'kind-res' : 'kind-sup') + '">' +
+      pctPts(ln.dist_pct, 1) + '</span></div>' +
+      (inChart(ln, rg) ? '' : '<div class="gl-off">在图外</div>') +
+      body + ms.map(function (m) { return statHtml(m, o.training); }).join('') + '</div>';
   }
 
-  function zoneCard(z, j, o, w) {
+  function probBar(p, cls, base) {
+    const w = Math.max(0, Math.min(100, (p || 0) * 100));
+    return '<div class="fb ' + (cls || '') + '"><i style="width:' + w.toFixed(1) + '%"></i>' +
+      (base != null ? '<b class="base" style="left:' + (base * 100).toFixed(1) + '%"></b>' : '') + '</div>';
+  }
+
+  function keyCard(k, lv, i, rg, km) {
+    const c = lv.kind === 'resistance' ? 'res' : 'sup';
+    const verb = lv.kind === 'resistance' ? '先回落' : '先反弹';
+    return '<div class="gl key ' + c + ' sl-' + lv.salience + '" data-li="k' + i + '">' +
+      '<div class="gl-h">' + swatch('key', lv.kind, KEY_W[lv.salience]) + '<b class="px">' + lv.price.toFixed(2) + '</b>' +
+      '<span class="nm">' + keyName(k, lv) + '</span><span class="stg" title="结构分 ' + lv.score.toFixed(1) +
+      '：转折次数、大级别转折、窗口极值等加起来">显著度 ' + lv.salience_zh + '</span>' +
+      '<span class="d ' + (c === 'res' ? 'kind-res' : 'kind-sup') + '">' + pctPts(lv.dist_pct, 1) + ' · ' +
+      Math.abs(lv.atr_dist).toFixed(1) + ' ATR</span></div>' +
+      (inChart(lv, rg) ? '' : '<div class="gl-off">在图外：离现价太远</div>') +
+      '<ul class="why">' + lv.why.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' +
+      '<div class="gl-p two"><div><span>' + km.reach_days + ' 日内碰到 <b>' + pct(lv.reach) + '</b></span>' + probBar(lv.reach, c === 'res' ? 'r' : '') + '</div>' +
+      '<div><span>碰到后' + verb + ' ' + km.win_atr + ' ATR <b>' + pct(lv.react) + '</b></span>' + probBar(lv.react, c === 'res' ? 'r' : '', 0.5) + '</div></div>' +
+      '</div>';
+  }
+
+  function zoneCard(z, j, o, w, k) {
     const zt = o.zone_tags || {};
     const tags = (z.tags || []).map(function (t) {
       const d = zt[t] || {};
@@ -552,23 +597,71 @@
     const head = '<div class="gz-h"><span class="gz-w">↕ ' + z.width_pct.toFixed(1) + '%' +
       (z.atr_w != null ? ' · ' + z.atr_w.toFixed(1) + ' ATR' : '') + '</span>' + tags +
       '<span class="gz-d" title="窗口内收盘落在这个区间的天数">停留 ' + z.days_in + ' 天</span></div>';
-    if (!z.current) return '<div class="gz" data-zi="' + j + '">' + head + '</div>';
-    const up = w.lines[j], dn = w.lines[j + 1];
+    if (!z.current) return '<div class="gz" data-zi="k' + j + '">' + head + '</div>';
+    const up = k.levels[j], dn = k.levels[j + 1];
     const text = (z.tags || []).map(function (t) { return esc((zt[t] || {}).text || ''); }).join('');
-    let ft = '';
-    const f = z.first_touch;
-    if (f) {
-      const reg = f.regime === 'up' ? '同样在 SMA200 上方' : (f.regime === 'down' ? '同样在 SMA200 下方' : '');
-      ft = '<div class="gz-ft"><span class="k">接下来 ' + f.days + ' 个交易日</span>先碰到上方线 <b class="kind-res">' + pct(f.up) +
-        '</b> · 先碰到下方线 <b class="kind-sup">' + pct(f.down) + '</b> · 都没碰到 ' + pct(f.none) +
-        '<div class="muted">按 ' + o.training.n_symbols + ' 只股票 ' + o.training.years + ' 年的真实走势统计：上方距离 ' +
-        f.up_atr.toFixed(1) + ' ATR、下方 ' + f.down_atr.toFixed(1) + ' ATR' + (reg ? '，只取' + reg + '的日子' : '') +
-        '（n=' + f.n + '）。只看距离，不含线本身的支撑/压力作用。</div></div>';
+    return '<div class="gz cur" data-zi="k' + j + '">' + head +
+      '<div class="gz-now">▶ 现价 <b>' + w.close.toFixed(2) + '</b> 在 ' + keyName(k, dn) + ' 和 ' + keyName(k, up) + ' 之间</div>' +
+      '<div class="gz-t">' + text + '</div></div>';
+  }
+
+  function judgeHtml(k, w, o) {
+    const s = k.summary || {};
+    const find = function (p) { return k.levels.filter(function (x) { return x.price === p; })[0]; };
+    const R1 = find(s.r1), S1 = find(s.s1), R2 = find(s.r2), S2 = find(s.s2);
+    const nm = function (lv) { return lv ? keyName(k, lv) + ' <b>' + lv.price.toFixed(2) + '</b>' : ''; };
+    const items = [];
+    if (R1 && S1) {
+      items.push('现价 <b>' + w.close.toFixed(2) + '</b> 夹在 ' + nm(S1) + '（' + pctPts(S1.dist_pct, 1) + '）和 ' + nm(R1) +
+        '（' + pctPts(R1.dist_pct, 1) + '）之间。' + (s.room_ratio != null ? (s.room_ratio < 0.8 ? '离压力更近：向上空间只有向下的 ' + s.room_ratio.toFixed(1) + ' 倍。' :
+        (s.room_ratio > 1.25 ? '离支撑更近：向上空间是向下的 ' + s.room_ratio.toFixed(1) + ' 倍。' : '上下空间差不多。')) : ''));
+    } else if (S1) {
+      items.push('上方' + esc(w.label) + '内没有结构上的压力，最近的关键支撑是 ' + nm(S1) + '。');
+    } else if (R1) {
+      items.push('下方' + esc(w.label) + '内没有结构上的支撑，最近的关键压力是 ' + nm(R1) + '。');
     }
-    return '<div class="gz cur" data-zi="' + j + '">' + head +
-      '<div class="gz-now">▶ 现价 <b>' + w.close.toFixed(2) + '</b> 在这一段：上方是 ' + esc(up.members[0].name) +
-      '（' + pctPts(up.dist_pct, 1) + '），下方是 ' + esc(dn.members[0].name) + '（' + pctPts(dn.dist_pct, 1) + '）</div>' +
-      '<div class="gz-t">' + text + '</div>' + ft + '</div>';
+    if (s.first_touch) {
+      const f = s.first_touch;
+      items.push('接下来 ' + f.days + ' 个交易日，历史同类情形先碰到上方 <b class="kind-res">' + pct(f.up) + '</b>、先碰到下方 <b class="kind-sup">' +
+        pct(f.down) + '</b>、都没碰到 ' + pct(f.none) + '。');
+    }
+    if (S1) {
+      items.push('<span class="k sup">回落</span>到 ' + nm(S1) + '：10 日内到这里的概率 ' + pct(S1.reach) + '，到了之后先反弹 1 ATR 的概率 ' +
+        pct(S1.react) + '。收盘跌破 <b>' + s.s1_break.toFixed(2) + '</b> 算这条支撑失效' +
+        (S2 ? '，下一个看 ' + nm(S2) + '。' : '，' + esc(w.label) + '内下方没有更多关键支撑。'));
+    }
+    if (R1) {
+      items.push('<span class="k res">上涨</span>到 ' + nm(R1) + '：10 日内到这里的概率 ' + pct(R1.reach) + '，到了之后先回落 1 ATR 的概率 ' +
+        pct(R1.react) + '。收盘站上 <b>' + s.r1_break.toFixed(2) + '</b> 算突破' +
+        (R2 ? '，下一个看 ' + nm(R2) + '。' : '，' + esc(w.label) + '内上方没有更多关键压力。'));
+    }
+    return '<div class="jd"><div class="jd-h">模型判断 · ' + esc(w.label) + '</div><ul>' +
+      items.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></div>';
+  }
+
+  function checkHtml(km) {
+    if (!km || !km.oos) return '';
+    const o = km.oos;
+    const e = o.edge || {};
+    const pp = function (x) {
+      if (!x || x.edge == null) return '—';
+      return (x.edge >= 0 ? '+' : '') + (x.edge * 100).toFixed(1) + ' ± ' + (x.ci * 100).toFixed(1);
+    };
+    const row = function (lab, k, cls) {
+      return '<tr class="' + (cls || '') + '"><td>' + lab + '</td><td>' + pp((e[k] || {}).support) + '</td><td>' + pp((e[k] || {}).resistance) + '</td></tr>';
+    };
+    const dec = o.reach_deciles || [];
+    const cal = dec.length ? dec.filter(function (_, i) { return i % 3 === 1; }).map(function (d) {
+      return '预测 ' + pct(d[0]) + ' → 实际 ' + pct(d[1]);
+    }).join('，') : '';
+    return '<div class="mc"><div class="sec-l">模型体检 · 样本外（' + esc(o.split.slice(0, 4)) + ' 年以后，训练时没见过）</div>' +
+      '<div class="note"><b>「10 日内碰到」</b>的概率是准的：' + cal + '（AUC ' + (o.reach_auc || 0).toFixed(2) + '）。</div>' +
+      '<div class="note"><b>「碰到后先反向」</b>只能靠距离和趋势粗略区分（AUC ' + (o.react_auc || 0).toFixed(2) + '）。' +
+      '价位本身多给的有效率（百分点，实际 − 同距离同趋势的预期，±95% 区间）：</div>' +
+      '<table class="mt"><thead><tr><th></th><th>当支撑</th><th>当压力</th></tr></thead><tbody>' +
+      row('结构关键位（本页）', 'structure', 'pick') + row('常用参考线', 'ref') + row('随机价位', 'random') +
+      '</tbody></table><div class="note">结论：关键位适合用来<b>定计划</b>（在哪里观察、跌破/突破哪里算错、下一步看哪里），' +
+      '但别指望某一条线本身「一定撑得住」——10 年回测里，转折点、均线、布林这些位置被碰到后的表现，和同样距离的随机价位只差 1 个百分点左右。</div></div>';
   }
 
   function renderGuide() {
@@ -581,68 +674,92 @@
       return;
     }
     const rg = winRange(w);
-    const tr = o.training || {};
-    $('#guideSub').textContent = w.label + '（' + w.from + ' 起）· 由高到低 ' + w.lines.length + ' 条线 · 统计用 ' +
-      tr.n_symbols + ' 只股票 × ' + tr.years + ' 年';
+    const km = o.key_model || {};
+    const k = w.key;
+    $('#guideSub').textContent = w.label + '（' + w.from + ' 起）· 概率模型用 ' + (km.n_symbols || '—') + ' 只股票 × ' + (km.years || '—') + ' 年训练';
     let html = '';
-    w.lines.forEach(function (ln, i) {
-      html += lineCard(ln, i, o, rg, w);
-      if (i < w.zones.length) html += zoneCard(w.zones[i], i, o, w);
-    });
+    if (k && k.levels.length) {
+      html += judgeHtml(k, w, o);
+      k.levels.forEach(function (lv, i) {
+        html += keyCard(k, lv, i, rg, km);
+        if (i < k.zones.length) html += zoneCard(k.zones[i], i, o, w, k);
+      });
+    } else {
+      html += '<div class="muted" style="padding:10px 12px">窗口内没有找到模型认可的关键位</div>';
+    }
+    html += checkHtml(km);
+    html += '<div class="ref-h"><button type="button" class="tog ' + (obs.ref ? 'on' : '') + '" data-ref-toggle>参考线 ' +
+      (obs.ref ? '已显示' : '已隐藏') + '</button><span class="muted">均线、布林、高低点、成交剖面等常用标志线，只作对照</span></div>';
+    if (obs.ref) w.lines.forEach(function (ln, i) { html += refCard(ln, i, o, rg); });
     list.innerHTML = html;
-    list.querySelectorAll('.gl').forEach(function (el) {
-      el.addEventListener('mouseenter', function () { setHot(Number(el.getAttribute('data-li')), -1); });
-      el.addEventListener('mouseleave', function () { setHot(-1, -1); });
-    });
-    list.querySelectorAll('.gz').forEach(function (el) {
-      el.addEventListener('mouseenter', function () { setHot(-1, Number(el.getAttribute('data-zi'))); });
-      el.addEventListener('mouseleave', function () { setHot(-1, -1); });
-    });
+    list.onmouseover = function (ev) {
+      const el = ev.target.closest('[data-li],[data-zi]');
+      if (!el) return;
+      setHot(el.getAttribute('data-li'), el.getAttribute('data-zi'));
+    };
+    list.onmouseleave = function () { setHot(null, null); };
+    const rt = list.querySelector('[data-ref-toggle]');
+    if (rt) rt.onclick = function () { setRef(!obs.ref); };
     const used = {};
-    w.zones.forEach(function (z) { (z.tags || []).forEach(function (t) { used[t] = true; }); });
+    ((k && k.zones) || []).forEach(function (z) { (z.tags || []).forEach(function (t) { used[t] = true; }); });
     const zt = o.zone_tags || {};
     $('#guideTags').innerHTML = '<div class="sec-l">区间标签是什么意思</div>' +
       Object.keys(zt).filter(function (t) { return used[t]; }).map(function (t) {
         return '<div class="tgdef"><span class="tg ' + t + '">' + esc(zt[t].label) + '</span>' + esc(zt[t].text) + '</div>';
       }).join('');
-    $('#guideDef').innerHTML = '颜色：<span class="kind-res">橙 = 在现价上方（压力）</span>，<span class="kind-sup">绿 = 在现价下方（支撑）</span>。' +
-      'ATR = 近 14 日平均每天的波动幅度。<br>' + esc(tr.hold_def || '') + '<br>' + esc(tr.first_touch_def || '');
+    $('#guideDef').innerHTML = '颜色：<span class="kind-res">橙 = 在现价上方（压力）</span>，<span class="kind-sup">绿 = 在现价下方（支撑）</span>；线越粗，结构上越显著。' +
+      'ATR = 近 14 日平均每天的波动幅度。<br>' + esc(km.def || '');
     const key = $('#obsKey');
     if (key) {
-      const groups = {};
-      w.lines.forEach(function (ln) { groups[ln.group] = true; });
-      key.innerHTML = Object.keys(GROUP_STYLE).filter(function (g) { return groups[g]; }).map(function (g) {
-        return '<span class="ky">' + swatch(g, null) + GROUP_STYLE[g].zh + '</span>';
-      }).join('');
+      let kh = '<span class="ky">' + swatch('key', 'support', 3) + '关键位（越粗越显著）</span>';
+      if (obs.ref) {
+        const groups = {};
+        w.lines.forEach(function (ln) { groups[ln.group] = true; });
+        kh += Object.keys(GROUP_STYLE).filter(function (g) { return groups[g]; }).map(function (g) {
+          return '<span class="ky">' + swatch(g, null) + GROUP_STYLE[g].zh + '</span>';
+        }).join('');
+      }
+      key.innerHTML = kh;
     }
-    const cur = list.querySelector('.gz.cur');
+    const rb = $('#btnRef');
+    if (rb) rb.classList.toggle('on', obs.ref);
     const rail = list.closest('.rail');
-    if (cur && rail) {
-      requestAnimationFrame(function () {
-        const dy = cur.getBoundingClientRect().top - rail.getBoundingClientRect().top;
-        rail.scrollTop = Math.max(0, rail.scrollTop + dy - rail.clientHeight * 0.3);
-      });
-    }
+    if (rail) rail.scrollTop = 0;
     footHint();
   }
 
+  function setRef(on) {
+    obs.ref = on;
+    obs.hot = null;
+    try { localStorage.setItem('levels.ref', on ? '1' : '0'); } catch (e) { /* */ }
+    renderGuide();
+    if (chart) { applyObsLines(); scheduleOverlay(); }
+  }
+
   function bindGuideCrosshair() {
+    let pending = null, raf = 0;
     chart.subscribeCrosshairMove(function (param) {
-      const w = obsWin();
-      if (!w || !param || !param.point) { setHot(-1, -1); return; }
-      const y = param.point.y;
-      let best = -1, bestD = 7;
-      w.lines.forEach(function (ln, i) {
-        const ly = candleSeries.priceToCoordinate(ln.price);
-        if (ly == null) return;
-        const d = Math.abs(ly - y);
-        if (d < bestD) { bestD = d; best = i; }
+      pending = param;
+      if (raf) return;
+      raf = requestAnimationFrame(function () {
+        raf = 0;
+        const p = pending;
+        const w = obsWin();
+        if (!w || !p || !p.point) { setHot(null, null); return; }
+        const y = p.point.y;
+        let best = null, bestD = 7;
+        obsLines.forEach(function (e) {
+          const ly = candleSeries.priceToCoordinate(e.price);
+          if (ly == null) return;
+          const d = Math.abs(ly - y) - (e.key ? 2 : 0);
+          if (d < bestD) { bestD = d; best = e.id; }
+        });
+        if (best) { setHot(best, null); return; }
+        const price = candleSeries.coordinateToPrice(y);
+        let zone = null;
+        if (price != null && w.key) w.key.zones.forEach(function (z, j) { if (price >= z.lo && price <= z.hi) zone = 'k' + j; });
+        setHot(null, zone);
       });
-      if (best >= 0) { setHot(best, -1); return; }
-      const p = candleSeries.coordinateToPrice(y);
-      let zone = -1;
-      if (p != null) w.zones.forEach(function (z, j) { if (p >= z.lo && p <= z.hi) zone = j; });
-      setHot(-1, zone);
     });
   }
 
@@ -650,7 +767,8 @@
     const r = orig();
     const w = obsWin();
     if (!r || !r.priceRange || !w) return r;
-    w.lines.forEach(function (ln) {
+    const pts = ((w.key && w.key.levels) || []).concat(obs.ref ? w.lines : []);
+    pts.forEach(function (ln) {
       if (Math.abs(ln.dist_pct) > AUTOSCALE_PCT) return;
       r.priceRange.minValue = Math.min(r.priceRange.minValue, ln.price);
       r.priceRange.maxValue = Math.max(r.priceRange.maxValue, ln.price);
@@ -728,8 +846,8 @@
     const o = obsData();
     if (!o || !o.by_window[key] || key === obs.win) return;
     obs.win = key;
-    obs.hot = -1;
-    obs.hotZone = -1;
+    obs.hot = null;
+    obs.hotZone = null;
     try { localStorage.setItem('levels.window', key); } catch (e) { /* */ }
     syncWinButtons();
     renderGuide();
@@ -1806,6 +1924,8 @@
   }
 
   function bindFilters() {
+    const rbtn = $('#btnRef');
+    if (rbtn) rbtn.addEventListener('click', function () { setRef(!obs.ref); });
     const vbtn = $('#btnVrvp');
     if (vbtn) {
       vbtn.addEventListener('click', function () {

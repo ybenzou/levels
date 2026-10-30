@@ -74,21 +74,15 @@ body::before {
       rgba(255, 184, 58, 0.012) 3px,
       rgba(255, 184, 58, 0.012) 4px
     );
-  mix-blend-mode: multiply;
 }
-/* film grain + CRT vignette */
+/* CRT vignette */
 body::after {
   content: "";
   pointer-events: none;
   position: fixed;
   inset: 0;
   z-index: 9998;
-  background-image:
-    radial-gradient(ellipse 78% 68% at 50% 42%, transparent 48%, rgba(0, 0, 0, 0.38) 100%),
-    url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.45'/%3E%3C/svg%3E");
-  background-size: 100% 100%, 160px 160px;
-  opacity: 0.8;
-  mix-blend-mode: multiply;
+  background: radial-gradient(ellipse 78% 68% at 50% 42%, transparent 48%, rgba(0, 0, 0, 0.3) 100%);
 }
 .app {
   height: 100%;
@@ -342,7 +336,6 @@ body::after {
       rgba(0, 0, 0, 0.45) 2px
     ),
     radial-gradient(ellipse 70% 60% at 50% 45%, rgba(111, 255, 90, 0.06), transparent 70%);
-  mix-blend-mode: multiply;
 }
 .tool {
   display: flex;
@@ -407,21 +400,14 @@ body::after {
   height: 100%;
   background: #010302;
 }
-/* CRT phosphor glow tubes — heavy bloom so candles read as neon tubes */
-#chart canvas,
-#chartLevels canvas,
-#chartHold canvas,
-#chartBreak canvas,
-#chartPlay canvas {
-  filter:
-    brightness(1.18)
-    contrast(1.22)
-    saturate(1.65)
-    drop-shadow(0 0 1px rgba(111, 255, 90, 0.95))
-    drop-shadow(0 0 4px rgba(111, 255, 90, 0.85))
-    drop-shadow(0 0 10px rgba(111, 255, 90, 0.55))
-    drop-shadow(0 0 18px rgba(255, 170, 40, 0.45))
-    drop-shadow(0 0 28px rgba(255, 170, 40, 0.28));
+/* Phosphor tone on the candle layer only. Blur/drop-shadow filters here are re-rasterised on
+   every crosshair move and made the charts stutter, so the glow is colour-only. */
+#chart tr:first-child > td:nth-child(2) canvas:first-child,
+#chartLevels tr:first-child > td:nth-child(2) canvas:first-child,
+#chartHold tr:first-child > td:nth-child(2) canvas:first-child,
+#chartBreak tr:first-child > td:nth-child(2) canvas:first-child,
+#chartPlay tr:first-child > td:nth-child(2) canvas:first-child {
+  filter: brightness(1.15) saturate(1.5);
 }
 #vrvpOverlay {
   position: absolute;
@@ -1344,12 +1330,8 @@ body::after {
 
 /* —— 信号 —— */
 .obs.sig { grid-template-columns: minmax(0, 1fr) 440px; }
-#chartSig canvas {
-  filter:
-    brightness(1.12)
-    saturate(1.4)
-    drop-shadow(0 0 2px rgba(255, 184, 58, 0.7))
-    drop-shadow(0 0 8px rgba(255, 170, 40, 0.3));
+#chartSig tr:first-child > td:nth-child(2) canvas:first-child {
+  filter: brightness(1.1) saturate(1.35);
 }
 .tool-l {
   font-size: 13px;
@@ -1666,3 +1648,41 @@ body::after {
   .win-switch { width: 100%; justify-content: flex-end; border-top: 1px solid var(--hair); padding: 2px 6px; }
   #view-observe .obs { grid-template-rows: minmax(300px, 52%) minmax(0, 1fr); }
 }
+
+/* —— 观察：模型判断 —— */
+.jd { margin: 8px 10px 6px; padding: 8px 10px 9px; border: 1px solid var(--amber); border-radius: 3px;
+  background: rgba(255,184,58,0.07); box-shadow: 0 0 12px rgba(255,184,58,0.14); }
+.jd-h { font-size: 14px; font-weight: 700; letter-spacing: 0.14em; color: var(--amber-hot); margin-bottom: 4px; }
+.jd ul { list-style: none; }
+.jd li { font-size: 14px; line-height: 1.55; color: var(--ink); padding: 3px 0; border-top: 1px dashed var(--hair); }
+.jd li:first-child { border-top: 0; }
+.jd b { color: var(--cream); }
+.k.sup { color: var(--crt); border-color: rgba(159,212,95,0.5); }
+.k.res { color: var(--amber); border-color: rgba(255,184,58,0.5); }
+.k.pl { color: var(--crt); border-color: rgba(159,212,95,0.5); }
+.k.mi { color: var(--red); border-color: rgba(224,138,69,0.5); }
+.gl.key .gl-h .px { font-size: 19px; }
+.gl.key.sl-high .gl-h .px { text-shadow: 0 0 8px rgba(255,208,120,0.6); }
+.gl-h .stg { font-size: 12px; font-weight: 700; color: var(--muted); border: 1px solid var(--line); border-radius: 2px; padding: 0 4px; }
+.gl.sl-high .gl-h .stg { color: var(--cream); border-color: var(--cream); }
+.gl.sl-mid .gl-h .stg { color: var(--amber-hot); border-color: var(--amber-dim); }
+.gl-p { margin-top: 4px; font-size: 14px; color: var(--ink); }
+.gl-p b { color: var(--cream); }
+.gl-p .fb { position: relative; height: 4px; margin-top: 3px; background: var(--recess); border: 1px solid var(--hair); }
+.gl-p .fb > i { display: block; height: 100%; background: var(--crt); }
+.gl-p .fb.r > i { background: var(--amber); }
+.gl-p .fb .base { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--cream); }
+.why { list-style: none; margin-top: 4px; }
+.why li { font-size: 13px; line-height: 1.5; color: var(--muted); padding-left: 12px; position: relative; }
+.why li::before { content: "·"; position: absolute; left: 3px; color: var(--dim); }
+.gl.ref { opacity: 0.85; }
+.mc { margin: 10px 0 4px; padding: 8px 0 4px; border-top: 1px solid var(--line); }
+.mc .mt { width: calc(100% - 24px); margin: 0 12px; font-size: 14px; border-collapse: collapse; }
+.mc .mt th, .mc .mt td { padding: 3px 6px; text-align: right; border-bottom: 1px solid var(--hair); }
+.mc .mt th:first-child, .mc .mt td:first-child { text-align: left; color: var(--muted); }
+.mc .mt tr.pick td { color: var(--cream); font-weight: 700; }
+.mc .note { padding: 6px 12px 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.ref-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; border-top: 1px solid var(--line); font-size: 13px; }
+.ref-h .tog { border: 1px solid var(--line); }
+.gl-p.two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.mc .note b { color: var(--cream); }
