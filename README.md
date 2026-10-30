@@ -30,6 +30,8 @@ Public GitHub Pages, static files only. Statistical reference, not investment ad
 - *Result so far.* Reach: the distance+trend model cuts the error by 36% (AUC 0.86, calibrated). Hold / break / follow-through: nothing beat the historical average. That includes the variants above, plus momentum, volume, volatility percentile, a rolling 12/24-month window and per-symbol track records, which were all equal or worse. So the page shows the lines' long-run rates: supports hold ≈ 53%, resistances ≈ 42%, breaks follow through ≈ 67%. The rail also shows, for the open symbol and window, the pre-2022 model's forecasts against what actually happened to its lines since 2022.
 - *Replay.* "回放" draws the R1/S1 the model drew on each day of the window (dotted steps) and marks where each one held (守) or broke (破). The rail lists the latest lines with their touch / hold / break / follow-through dates.
 
+- *Pre-market / intraday.* Builds during the US pre-market and session add the latest trade (Yahoo 5-minute bars incl. pre/post). The lines stay as drawn from the last close. The page says which lines the price has already crossed, how far it is from each break line (a close beyond it is what counts), and re-estimates the 10-day reach of the next lines at the new distance. The backtest only uses regular-session highs, lows and closes, so pre-market prints are a heads-up, not a touch. While a session is open, Yahoo's partial daily bar is dropped, so the model never treats an unfinished day as a close.
+
 The chart draws key levels as solid lines (thicker means more salient) with a ±0.3 ATR band. Bands between lines show the price's current zone and how often paths reached the upper vs lower line first within 10 days.
 
 Rendering note: the CRT look uses a colour-only CSS filter on the candle canvas and no blend-mode overlays. Drop-shadow filters and `mix-blend-mode` made every crosshair repaint re-rasterise the page (~900 ms/frame); it now holds 60 fps (p50 16.7 ms).
@@ -61,4 +63,4 @@ Outputs:
 
 Symbols shown and the training pool live in `pipeline/config.py`.
 
-`.github/workflows/refresh-data.yml` rebuilds at 08:00 HKT Tue–Sat (after each US session) and commits the data. It can also be run by hand from the Actions tab.
+`.github/workflows/refresh-data.yml` rebuilds after each US session (05:30 and 08:00 HKT), and also during the US pre-market and session (18:00, 20:00, 22:00, 00:00, 03:00 HKT), and commits the data. It can also be run by hand from the Actions tab.

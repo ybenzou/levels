@@ -2,8 +2,12 @@ name: Refresh data
 
 on:
   schedule:
-    # 00:00 UTC Tue–Sat = 08:00 HKT, after each US session (Mon–Fri) has closed.
+    # After each US session (Mon–Fri) has closed: 21:30 UTC (05:30 HKT) and 00:00 UTC (08:00 HKT).
+    - cron: "30 21 * * 1-5"
     - cron: "0 0 * * 2-6"
+    # US pre-market and regular session (Mon–Fri): live / pre-market price against the close-based lines.
+    # 10:00, 12:00, 14:00, 16:00, 19:00 UTC = 18:00, 20:00, 22:00, 00:00, 03:00 HKT.
+    - cron: "0 10,12,14,16,19 * * 1-5"
   workflow_dispatch:
 
 permissions:
@@ -36,7 +40,7 @@ jobs:
             echo "No data changes."
             exit 0
           fi
-          git commit -m "data: refresh $(date -u +%F)"
+          git commit -m "data: refresh $(date -u +%FT%H:%MZ)"
           # Other refreshers may also write data.json; on conflict keep this run's output.
           git pull --rebase -X theirs origin main
           git push origin HEAD:main

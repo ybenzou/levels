@@ -1693,3 +1693,6 @@ body::after {
 .mc .eps li { font-size: 13px; line-height: 1.55; color: var(--muted); }
 .mc .eps li b { color: var(--cream); }
 .mc .eps .k { margin-right: 6px; }
+.jd.live { border-color: var(--cream); }
+.jd.live .jd-h { color: var(--cream); letter-spacing: 0.06em; }
+.jd-n { margin-top: 6px; font-size: 12px; line-height: 1.5; color: var(--muted); }

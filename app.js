@@ -309,8 +309,10 @@
     $('#title').textContent = sym;
     document.title = 'Levels · ' + sym;
     const close = Number(DATA.last_close).toFixed(2);
+    const q = DATA.live;
     $('#asof').innerHTML = '截至 <strong>' + esc(DATA.as_of) + '</strong> · 末收 <strong>' +
-      close + '</strong>';
+      close + '</strong>' + (q ? ' · ' + liveLabel(q) + ' <strong>' + q.price.toFixed(2) + '</strong> <span class="' +
+      (q.chg_pct < 0 ? 'kind-sup' : 'kind-res') + '">' + pctPts(q.chg_pct, 1) + '</span> <span class="muted">' + bjTime(q.time) + '</span>' : '');
     document.querySelectorAll('#tickerSwitch .tick').forEach(function (btn) {
       const s = btn.getAttribute('data-symbol');
       const on = s === sym;
@@ -328,6 +330,7 @@
   const obs = { win: '3m', hot: null, hotZone: null, ref: false, hist: true };
   let obsLines = [];
   const histSeries = { r1: null, s1: null };
+  let liveLine = null;
   const AUTOSCALE_PCT = 12;
   const GROUP_STYLE = {
     ma: { style: 0, w: 1, zh: '均线', dash: '' },
@@ -477,6 +480,7 @@
   function applyObsLines() {
     obsLines.forEach(function (e) { try { candleSeries.removePriceLine(e.handle); } catch (err) { /* */ } });
     obsLines = [];
+    if (liveLine) { try { candleSeries.removePriceLine(liveLine); } catch (err) { /* */ } liveLine = null; }
     const w = obsWin();
     if (!w || !candleSeries) return;
     const add = function (e, style) {
@@ -489,6 +493,12 @@
     if (obs.ref) {
       w.lines.forEach(function (ln, i) {
         add({ id: 'r' + i, price: ln.price, kind: ln.kind, group: ln.group, key: false }, (GROUP_STYLE[ln.group] || GROUP_STYLE.range).style);
+      });
+    }
+    if (DATA.live) {
+      liveLine = candleSeries.createPriceLine({
+        price: DATA.live.price, color: 'rgba(243,235,212,0.85)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: true, title: liveLabel(DATA.live),
       });
     }
     if (w.key) {
@@ -625,6 +635,53 @@
       '<div class="gz-t">' + text + '</div></div>';
   }
 
+  function liveLabel(q) { return { pre: '盘前', regular: '盘中' }[q.session] || '最新'; }
+  function bjTime(iso) {
+    try {
+      return new Date(iso).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) + ' 北京时间';
+    } catch (e) { return iso; }
+  }
+
+  function liveHtml(k) {
+    const q = DATA.live, L = k.live;
+    if (!q || !L) return '';
+    const byP = function (p) { return k.levels.filter(function (x) { return x.price === p; })[0]; };
+    const nm = function (lv) { return keyName(k, lv) + ' <b>' + lv.price.toFixed(2) + '</b>'; };
+    const px = q.price;
+    const items = [];
+    L.levels.forEach(function (x) {
+      if (x.status === 'ahead') return;
+      const lv = byP(x.price);
+      if (!lv) return;
+      const sup = lv.kind === 'support';
+      const brk = sup ? '跌破' : '突破';
+      const gap = (lv.fail / px - 1) * 100;
+      if (x.status === 'beyond') {
+        items.push(nm(lv) + ' 已越过' + brk + '线 <b>' + lv.fail.toFixed(2) + '</b>：收盘仍在' + (sup ? '下方' : '上方') + '就算' + brk +
+          '。历史上' + brk + '后 ' + pct(lv.follow) + ' 会继续走到 <b>' + lv.follow_to.toFixed(2) + '</b>，其余先收回线' +
+          (sup ? '上方' : '下方') + '（假' + brk + '）。');
+      } else {
+        items.push((x.status === 'through' ? '已' + (sup ? '跌到 ' : '涨过 ') + nm(lv) + (sup ? ' 下方' : ' 上方') : '已碰到 ' + nm(lv)) +
+          '，离' + brk + '线 <b>' + lv.fail.toFixed(2) + '</b> 还差 ' + Math.abs(gap).toFixed(1) + '%。收盘' + (sup ? '低于' : '高于') +
+          '它才算' + brk + '；先' + (sup ? '反弹' : '回落') + '到 <b>' + lv.target.toFixed(2) + '</b> 算守住。历史上碰到后守住 ' +
+          pct(lv.hold) + '、' + brk + ' ' + pct(lv.brk) + '，' + brk + '后 ' + pct(lv.follow) + ' 会继续走到 <b>' + lv.follow_to.toFixed(2) + '</b>。');
+      }
+    });
+    const ahead = L.levels.filter(function (x) { return x.status === 'ahead'; });
+    const dn = ahead.filter(function (x) { return x.price < px; }).sort(function (a, b) { return b.price - a.price; })[0];
+    const up = ahead.filter(function (x) { return x.price > px; }).sort(function (a, b) { return a.price - b.price; })[0];
+    const parts = [];
+    if (dn && byP(dn.price)) parts.push('下方 ' + nm(byP(dn.price)) + '（' + pctPts(dn.dist_pct, 1) + '）10 日内碰到 ' + pct(dn.reach));
+    if (up && byP(up.price)) parts.push('上方 ' + nm(byP(up.price)) + '（' + pctPts(up.dist_pct, 1) + '）' + pct(up.reach));
+    if (parts.length) items.push('按' + liveLabel(q) + '价重算：' + parts.join('；') + '。');
+    if (!items.length) items.push('还在收盘时的 ' + (L.down && byP(L.down) ? nm(byP(L.down)) : '支撑') + ' 和 ' +
+      (L.up && byP(L.up) ? nm(byP(L.up)) : '压力') + ' 之间，计划不变。');
+    return '<div class="jd live"><div class="jd-h">' + liveLabel(q) + ' <b>' + px.toFixed(2) + '</b> <span class="' +
+      (q.chg_pct < 0 ? 'kind-sup' : 'kind-res') + '">' + pctPts(q.chg_pct, 1) + '</span> · ' + bjTime(q.time) + '</div><ul>' +
+      items.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul>' +
+      '<div class="jd-n">线还是按 ' + esc(DATA.as_of) + ' 收盘画的。回测里的碰到 / 守住 / 突破只看正式交易时段的高低点和收盘，盘前价只用来提前对照；收盘后页面按收盘价重画。</div></div>';
+  }
+
   function judgeHtml(k, w, o) {
     const s = k.summary || {};
     const find = function (p) { return k.levels.filter(function (x) { return x.price === p; })[0]; };
@@ -655,7 +712,7 @@
         pct(R1.hold) + '、突破 ' + pct(R1.brk) + '，突破后 ' + pct(R1.follow) + ' 会继续上行 1 ATR。收盘站上 <b>' + s.r1_break.toFixed(2) + '</b> 算突破' +
         (R2 ? '，下一个看 ' + nm(R2) + '。' : '，' + esc(w.label) + '内上方没有更多关键压力。'));
     }
-    return '<div class="jd"><div class="jd-h">模型判断 · ' + esc(w.label) + '</div><ul>' +
+    return '<div class="jd"><div class="jd-h">模型判断 · ' + esc(w.label) + (DATA.live ? ' · 按 ' + esc(DATA.as_of) + ' 收盘' : '') + '</div><ul>' +
       items.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></div>';
   }
 
@@ -736,7 +793,7 @@
     $('#guideSub').textContent = w.label + '（' + w.from + ' 起）· 概率模型用 ' + (km.n_symbols || '—') + ' 只股票 × ' + (km.years || '—') + ' 年训练';
     let html = '';
     if (k && k.levels.length) {
-      html += judgeHtml(k, w, o);
+      html += liveHtml(k) + judgeHtml(k, w, o);
       k.levels.forEach(function (lv, i) {
         html += keyCard(k, lv, i, rg, km);
         if (i < k.zones.length) html += zoneCard(k.zones[i], i, o, w, k);
@@ -870,6 +927,7 @@
     const w = obsWin();
     if (!r || !r.priceRange || !w) return r;
     const pts = ((w.key && w.key.levels) || []).concat(obs.ref ? w.lines : []);
+    if (DATA.live) pts.push({ price: DATA.live.price, dist_pct: 0 });
     pts.forEach(function (ln) {
       if (Math.abs(ln.dist_pct) > AUTOSCALE_PCT) return;
       r.priceRange.minValue = Math.min(r.priceRange.minValue, ln.price);
