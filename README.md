@@ -1,7 +1,7 @@
-# AVGO 日线关键价位
+# AVGO Levels
 
-Interactive observation dashboard (Lightweight Charts candlesticks + confluence levels + backtest accuracy).
+Swiss-style daily key-levels dashboard (observation-first).
 
 Live: https://ybenzou.github.io/avgo-levels/
 
-描述性统计，非交易建议。
+Public GitHub Pages. Refresh `data.json` in place; weekday ~08:00 HKT.
