@@ -51,8 +51,38 @@ def fetch_daily(symbol, rng="10y", use_cache=False, cache_max_age_h=12):
             bars[-1] = bar
         else:
             bars.append(bar)
+    reg = ((r["meta"].get("currentTradingPeriod") or {}).get("regular") or {})
+    if bars and ts and reg.get("start") and ts[-1] >= reg["start"] and time.time() < reg.get("end", 0):
+        bars.pop()  # today's session is still open: its daily bar is not a close yet
     out = {"symbol": symbol, "currency": r["meta"].get("currency"),
            "name": r["meta"].get("longName") or r["meta"].get("shortName") or symbol, "bars": bars}
     with open(path, "w") as f:
         json.dump(out, f)
     return out
+
+
+def fetch_live(symbol):
+    """Latest trade incl. pre/post-market from 5-minute bars of the current trading day."""
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=1d&interval=5m&includePrePost=true"
+    r = (_get(url, retries=2).get("chart") or {}).get("result")
+    if not r:
+        return None
+    r = r[0]
+    m = r["meta"]
+    ts = r.get("timestamp") or []
+    q = r["indicators"]["quote"][0]
+    pts = [(t, q["high"][i], q["low"][i], q["close"][i]) for i, t in enumerate(ts)
+           if q["close"][i] is not None and q["high"][i] is not None and q["low"][i] is not None]
+    if not pts:
+        return None
+    per = m.get("currentTradingPeriod") or {}
+    t = pts[-1][0]
+    session = "closed"
+    for k in ("pre", "regular", "post"):
+        p = per.get(k) or {}
+        if p.get("start", 0) <= t < p.get("end", 0):
+            session = k
+    off = m.get("gmtoffset", 0)
+    return {"price": round(pts[-1][3], 2), "open": round(pts[0][3], 2), "time": datetime.fromtimestamp(t, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "date": datetime.fromtimestamp(t + off, tz=timezone.utc).strftime("%Y-%m-%d"), "session": session,
+            "high": round(max(x[1] for x in pts), 2), "low": round(min(x[2] for x in pts), 2)}

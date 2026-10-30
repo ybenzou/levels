@@ -18,7 +18,7 @@ import model as M  # noqa: E402
 import keylevels  # noqa: E402
 import observe  # noqa: E402
 from config import DISPLAY_BARS, PROXY, TARGETS, UNIVERSE  # noqa: E402
-from fetch import fetch_daily  # noqa: E402
+from fetch import fetch_daily, fetch_live  # noqa: E402
 from indicators import compute_all  # noqa: E402
 from levels import compute_levels, indicator_state, key_bands  # noqa: E402
 
@@ -71,8 +71,24 @@ def pooled_validation(uni, panel, th):
             "sizing": sizing, "tilt": tilt, "verdict": verdict}
 
 
+def _live(sym, bars):
+    try:
+        q = fetch_live(sym)
+    except Exception as e:
+        print(f"live {sym}: {e}", file=sys.stderr)
+        return None
+    if not q or q["date"] <= bars[-1]["date"] or q["session"] not in ("pre", "regular"):
+        return None
+    q["prev_close"] = round(bars[-1]["close"], 2)
+    q["chg_pct"] = round((q["price"] / bars[-1]["close"] - 1) * 100, 2)
+    pb = bars + [{"date": q["date"], "open": q["open"], "high": max(q["high"], q["price"]), "low": min(q["low"], q["price"]),
+                  "close": q["price"], "volume": 0}]
+    return {"quote": q, "bars": pb, "ind": compute_all(pb)}
+
+
 def build_symbol(sym, uni, panel, th, validation, generated_at, meta, pooled_hold, ft_cache, km):
     bars, ind = uni[sym]
+    live = _live(sym, bars)
     levels, vp, window = compute_levels(bars, ind, DISPLAY_BARS)
     disp = bars[-DISPLAY_BARS:]
     bt = events.run(bars, ind, disp[0]["date"])
@@ -114,7 +130,8 @@ def build_symbol(sym, uni, panel, th, validation, generated_at, meta, pooled_hol
                    "low": round(b["low"], 2), "close": round(b["close"], 2), "volume": b["volume"]} for b in disp],
         "price_series": [{"date": b["date"], "close": round(b["close"], 2)} for b in disp],
         "backtest": bt,
-        "observe": observe.build(bars, ind, bt, pooled_hold, uni, ft_cache, km),
+        "observe": observe.build(bars, ind, bt, pooled_hold, uni, ft_cache, km, live),
+        "live": live["quote"] if live else None,
         "model": mdl,
     }
 

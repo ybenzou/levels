@@ -294,7 +294,7 @@ def _summary(levels, zones, px):
     return out
 
 
-def window_guide(bars, ind, nb, wl, pooled, own_hold, uni, ft_cache, km=None):
+def window_guide(bars, ind, nb, wl, pooled, own_hold, uni, ft_cache, km=None, live=None):
     n = len(bars)
     i = n - 1
     px = bars[i]["close"]
@@ -355,6 +355,8 @@ def window_guide(bars, ind, nb, wl, pooled, own_hold, uni, ft_cache, km=None):
             kz = _zones(kl, win, px, a, p, boll, ind, uni, ft_cache)
             key = {"levels": kl, "zones": kz, "summary": _summary(kl, kz, px),
                    "history": keylevels.history(km, bars, ind, nb)}
+            if live:
+                key["live"] = keylevels.live_view(km, live["bars"], live["ind"], nb, kl, live["quote"])
 
     prof = None
     if p:
@@ -365,12 +367,12 @@ def window_guide(bars, ind, nb, wl, pooled, own_hold, uni, ft_cache, km=None):
             "atr14": _r(a), "close": _r(px)}
 
 
-def build(bars, ind, own_bt, pooled, uni, ft_cache, km=None):
+def build(bars, ind, own_bt, pooled, uni, ft_cache, km=None, live=None):
     own_hold = own_bt["hold"]["by_family"]
     by = {}
     for key, nb, wl in WINDOWS:
         if len(bars) >= nb:
-            by[key] = dict(window_guide(bars, ind, nb, wl, pooled, own_hold, uni, ft_cache, km), label=wl)
+            by[key] = dict(window_guide(bars, ind, nb, wl, pooled, own_hold, uni, ft_cache, km, live), label=wl)
     return {
         "windows": [{"key": k, "bars": nb, "label": wl} for k, nb, wl in WINDOWS if k in by],
         "default": DEFAULT_WINDOW if DEFAULT_WINDOW in by else next(iter(by), None),

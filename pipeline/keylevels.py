@@ -383,10 +383,13 @@ def lines_at(S, t, L):
             x = z["x"]
             z["side"], z["rank"] = side, i + 1
             z["ctx"] = ctx(x)
-            z["full"] = z["ctx"] + [i + 1, z["score"], x[IX["n_piv"]], x[IX["major"]], x[IX["ext"]], x[IX["both"]],
-                                    x[IX["cross"]], x[IX["tap"]], x[IX["ma"]], x[IX["age"]], x[IX["n_touch"]],
-                                    L / 63, a / c * 100]
+            z["full"] = _full(x, i + 1, z["score"], L, a, c)
     return sel
+
+
+def _full(x, rank, score, L, a, c):
+    return ctx(x) + [rank, score, x[IX["n_piv"]], x[IX["major"]], x[IX["ext"]], x[IX["both"]], x[IX["cross"]],
+                     x[IX["tap"]], x[IX["ma"]], x[IX["age"]], x[IX["n_touch"]], L / 63, a / c * 100]
 
 
 def _fit(rows, y, var):
@@ -583,6 +586,46 @@ def history(m, bars, ind, nb):
         out.append(ep)
     return {"track": track, "episodes": out, "score": score,
             "score_from": S.d[max(t0, nb + 1)] if max(t0, nb + 1) < n else None}
+
+
+def live_view(m, pbars, pind, nb, levels, live):
+    """Read the close-based lines against a live / pre-market price. pbars ends with a provisional bar
+    built from today's trades; it is used only to re-estimate the 10-day reach at the new distance."""
+    S = Sym(pbars, pind)
+    t = len(pbars) - 1
+    a = S.a[t]
+    px = live["price"]
+    if not a or not levels:
+        return None
+    _, wh, wl = candidates(S, t, nb)
+    rows = []
+    for lv in levels:
+        P = lv["price"]
+        x = features(S, t, nb, P, wh, wl)
+        rows.append({"lv": lv, "x": x, "side": "support" if P < px else "resistance"})
+    for side in SIDES:
+        same = sorted((r for r in rows if r["side"] == side), key=lambda r: abs(r["lv"]["price"] - px))
+        for i, r in enumerate(same):
+            r["rank"] = i + 1
+    var, mdl = m["prod"]["reach"]
+    out = []
+    for r in rows:
+        lv, x = r["lv"], r["x"]
+        P, a0 = lv["price"], (lv["hi"] - lv["lo"]) / (2 * TOL)
+        sup = lv["kind"] == "support"
+        if sup:
+            status = "beyond" if px < lv["fail"] else ("through" if px < P else ("touched" if live["low"] <= P + TOUCH * a0 else "ahead"))
+        else:
+            status = "beyond" if px > lv["fail"] else ("through" if px > P else ("touched" if live["high"] >= P - TOUCH * a0 else "ahead"))
+        q = {"side": r["side"], "ctx": ctx(x), "full": _full(x, r["rank"], lv["score"], nb, a, px)}
+        out.append({"price": P, "kind": lv["kind"], "side_now": r["side"], "status": status,
+                    "dist_pct": round((P / px - 1) * 100, 2), "atr_dist": round((P - px) / a0, 2),
+                    "reach": round(_pred(var, mdl, q), 3) if status == "ahead" else None})
+    above = [o for o in out if o["price"] > px]
+    below = [o for o in out if o["price"] < px]
+    return {"levels": out,
+            "up": min(above, key=lambda o: o["price"])["price"] if above else None,
+            "down": max(below, key=lambda o: o["price"])["price"] if below else None}
 
 
 def model_card(m):
