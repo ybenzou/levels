@@ -152,7 +152,7 @@ def candidates(S, t, L, rng=None):
     return out, wh, wl
 
 
-def features(S, t, L, P, wh, wl, detail=False):
+def features(S, t, L, P, wh, wl):
     a = S.a[t]
     tol = TOL * a
     s = t - L + 1
@@ -224,11 +224,7 @@ def features(S, t, L, P, wh, wl, detail=False):
         (c[t] - wl) / (wh - wl) if wh > wl else 0.5,
         max(-3.0, min(3.0, slope)),
     ]
-    if not detail:
-        return x
-    return x, {"pivots": piv, "crosses": crosses, "hi": nh, "lo": nl,
-               "ext": "hi" if abs(P - wh) <= tol else ("lo" if abs(P - wl) <= tol else None),
-               "ma": [k for k, arr in zip(("SMA20", "SMA50", "SMA200"), S.ma) if arr[t] and abs(arr[t] - P) <= tol]}
+    return x
 
 
 def label(S, t, P):
@@ -314,10 +310,6 @@ def fit_logit(X, y, iters=8):
 def predict(m, x):
     z = m["w"][0] + sum(wk * (xk - mk) / sk for wk, xk, mk, sk in zip(m["w"][1:], x, m["mu"], m["sd"]))
     return _sig(z)
-
-
-def contributions(m, x):
-    return [wk * (xk - mk) / sk for wk, xk, mk, sk in zip(m["w"][1:], x, m["mu"], m["sd"])]
 
 
 def _auc(ps, ys):
@@ -433,28 +425,6 @@ def train(uni, seed=7):
     return m
 
 
-PHRASE = {
-    "n_piv": ("转折次数多", "转折次数少"),
-    "both": ("支撑和压力角色互换过", "没有角色互换"),
-    "react": ("转折后的平均反应大", "转折后的平均反应小"),
-    "cross": ("被收盘来回穿越得多", "很少被收盘穿越"),
-    "tap": ("成交量集中经过这里", "成交量很少经过这里"),
-    "dist": ("离现价较远", "离现价很近"),
-    "ext": ("是窗口最高/最低点", "不是窗口极值"),
-    "ma": ("与均线重合", "附近没有均线"),
-    "age": ("很久没有在这里转折", "最近刚在这里转折"),
-    "with_trend": ("顺着趋势方向", "逆着趋势方向"),
-    "support": ("是支撑（历史上支撑整体比压力可靠）", "是压力（历史上压力整体比支撑弱）"),
-    "react_max": ("有过一次很强的转折", "没有过强转折"),
-    "piv_vol": ("转折当天放量", "转折当天没有放量"),
-    "n_touch": ("被反复试探过", "很少被试探"),
-    "major": ("是一年级别的大转折点", "不是一年级别的转折点"),
-    "round": ("是整数关口", "不是整数关口"),
-    "pos": ("现价在窗口区间偏上", "现价在窗口区间偏下"),
-    "slope": ("20 日均线向上", "20 日均线向下"),
-}
-
-
 def _salience(score):
     if score >= 3:
         return "high", "高"
@@ -463,29 +433,7 @@ def _salience(score):
     return "low", "低"
 
 
-def _reasons(x, det, S, wl):
-    out = []
-    piv = sorted(det["pivots"])
-    if piv:
-        ds = "、".join(S.d[i][5:] for i, _ in piv[-4:])
-        kinds = ("高点" if det["hi"] else "") + ("/" if det["hi"] and det["lo"] else "") + ("低点" if det["lo"] else "")
-        out.append(f"{wl}在这里形成过 {len(piv)} 次{kinds}（{ds}），最强一次之后走出 {x[IX['react_max']]:.1f} ATR")
-    if x[IX["major"]]:
-        out.append("也是近一年的大级别转折点（左右各 10 根 K 线里的最高/最低）")
-    if det["ext"]:
-        out.append(f"是{wl}{'最高' if det['ext'] == 'hi' else '最低'}点")
-    if x[IX["both"]]:
-        out.append("既当过支撑也当过压力（角色互换）")
-    if x[IX["piv_vol"]] >= 1.5:
-        out.append(f"转折当天成交量是 20 日均量的 {x[IX['piv_vol']]:.1f} 倍")
-    if det["ma"]:
-        out.append("附近还有 " + "、".join(det["ma"]))
-    if det["crosses"] >= 4:
-        out.append(f"{wl}收盘来回穿过它 {det['crosses']} 次，这一带更像震荡中枢而不是硬边界")
-    return out
-
-
-def judge(m, bars, ind, nb, wl):
+def judge(m, bars, ind, nb):
     S = Sym(bars, ind)
     t = len(bars) - 1
     a = S.a[t]
@@ -495,8 +443,8 @@ def judge(m, bars, ind, nb, wl):
     cs, wh, wl_ = candidates(S, t, nb)
     scored = []
     for P, _, _ in cs:
-        x, det = features(S, t, nb, P, wh, wl_, detail=True)
-        scored.append({"price": P, "score": struct_score(x), "x": x, "det": det})
+        x = features(S, t, nb, P, wh, wl_)
+        scored.append({"price": P, "score": struct_score(x), "x": x})
     sel = select(scored, a, c)
     sel.sort(key=lambda z: -z["price"])
     levels = []
@@ -510,7 +458,8 @@ def judge(m, bars, ind, nb, wl):
             "reach": round(predict(m["reach"], cx), 3), "react": round(predict(m["react"], cx), 3),
             "base": m["base_side"].get(side),
             "dist_pct": round((z["price"] / c - 1) * 100, 2), "atr_dist": round((z["price"] - c) / a, 2),
-            "why": _reasons(z["x"], z["det"], S, wl),
+            "target": round(z["price"] + (WIN_ATR if side == "support" else -WIN_ATR) * a, 2),
+            "fail": round(z["price"] + (-FAIL_ATR if side == "support" else FAIL_ATR) * a, 2),
         })
     return levels
 

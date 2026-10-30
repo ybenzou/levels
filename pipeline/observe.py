@@ -271,7 +271,7 @@ def _zones(levels, win, px, a, p, boll, ind, uni, ft_cache):
     return zones
 
 
-def _summary(levels, zones, px, a):
+def _summary(levels, zones, px):
     above = [x for x in levels if x["kind"] == "resistance"]
     below = [x for x in levels if x["kind"] == "support"]
     R = sorted(above, key=lambda x: x["price"])
@@ -280,11 +280,11 @@ def _summary(levels, zones, px, a):
     out = {"close": round(px, 2)}
     if R:
         out["r1"] = R[0]["price"]
-        out["r1_break"] = round(R[0]["price"] + keylevels.FAIL_ATR * a, 2)
+        out["r1_break"] = R[0]["fail"]
         out["r2"] = R[1]["price"] if len(R) > 1 else None
     if S:
         out["s1"] = S[0]["price"]
-        out["s1_break"] = round(S[0]["price"] - keylevels.FAIL_ATR * a, 2)
+        out["s1_break"] = S[0]["fail"]
         out["s2"] = S[1]["price"] if len(S) > 1 else None
     if R and S:
         up, dn = R[0]["price"] - px, px - S[0]["price"]
@@ -350,10 +350,10 @@ def window_guide(bars, ind, nb, wl, pooled, own_hold, uni, ft_cache, km=None):
     zones = _zones(lines, win, px, a, p, boll, ind, uni, ft_cache)
     key = None
     if km:
-        kl = keylevels.judge(km, bars, ind, nb, wl)
+        kl = keylevels.judge(km, bars, ind, nb)
         if kl:
             kz = _zones(kl, win, px, a, p, boll, ind, uni, ft_cache)
-            key = {"levels": kl, "zones": kz, "summary": _summary(kl, kz, px, a)}
+            key = {"levels": kl, "zones": kz, "summary": _summary(kl, kz, px)}
 
     prof = None
     if p:

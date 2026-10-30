@@ -377,6 +377,17 @@
       .sort(function (a, b) { return lv.kind === 'resistance' ? a.price - b.price : b.price - a.price; });
     return (lv.kind === 'resistance' ? '关键压力 R' : '关键支撑 S') + (same.indexOf(lv) + 1);
   }
+  function keyPlan(k, lv) {
+    const res = lv.kind === 'resistance';
+    const same = k.levels.filter(function (x) { return x.kind === lv.kind; })
+      .sort(function (a, b) { return res ? a.price - b.price : b.price - a.price; });
+    const nx = same[same.indexOf(lv) + 1];
+    return {
+      hold: '碰到后看' + (res ? '回落' : '反弹') + '到 <b>' + lv.target.toFixed(2) + '</b>（' + (res ? '−' : '+') + '1 ATR）',
+      fail: '收盘' + (res ? '站上' : '跌破') + ' <b>' + lv.fail.toFixed(2) + '</b> 算' + (res ? '突破' : '失效') + ' → ' +
+        (nx ? '下一个看 ' + keyName(k, nx) + ' <b>' + nx.price.toFixed(2) + '</b>' : '窗口内' + (res ? '上方' : '下方') + '没有更多关键位')
+    };
+  }
 
   function scheduleOverlay() {
     if (overlayRaf) cancelAnimationFrame(overlayRaf);
@@ -493,7 +504,7 @@
       el.innerHTML = swatch('key', lv.kind, KEY_W[lv.salience]) + '<b>' + keyName(w.key, lv) + '</b> <span class="px">' +
         lv.price.toFixed(2) + '</span> <span class="' + (lv.kind === 'resistance' ? 'kind-res' : 'kind-sup') + '">' +
         pctPts(lv.dist_pct, 1) + '</span> · 10 日内碰到 ' + pct(lv.reach) + ' · 碰到后' + (lv.kind === 'resistance' ? '回落' : '反弹') +
-        ' ' + pct(lv.react) + ' · ' + esc(lv.why[0] || '');
+        ' ' + pct(lv.react) + ' · ' + keyPlan(w.key, lv).fail;
       return;
     }
     if (id && id[0] === 'r') {
@@ -510,7 +521,7 @@
         (z.tags || []).map(function (t) { return esc((tags[t] || {}).label || t); }).join(' · ') + ' · 宽 ' + z.width_pct.toFixed(1) + '%';
       return;
     }
-    el.innerHTML = '<span class="muted">实线 = 模型从价格结构里找出的关键位，色带 = ±0.3 ATR 反应区；鼠标移上去看依据和概率</span>';
+    el.innerHTML = '<span class="muted">实线 = 模型从价格结构里找出的关键位，色带 = ±0.3 ATR 反应区；鼠标移上去看概率和失效线</span>';
   }
 
   function setHot(line, zone) {
@@ -573,6 +584,7 @@
   function keyCard(k, lv, i, rg, km) {
     const c = lv.kind === 'resistance' ? 'res' : 'sup';
     const verb = lv.kind === 'resistance' ? '先回落' : '先反弹';
+    const plan = keyPlan(k, lv);
     return '<div class="gl key ' + c + ' sl-' + lv.salience + '" data-li="k' + i + '">' +
       '<div class="gl-h">' + swatch('key', lv.kind, KEY_W[lv.salience]) + '<b class="px">' + lv.price.toFixed(2) + '</b>' +
       '<span class="nm">' + keyName(k, lv) + '</span><span class="stg" title="结构分 ' + lv.score.toFixed(1) +
@@ -580,7 +592,7 @@
       '<span class="d ' + (c === 'res' ? 'kind-res' : 'kind-sup') + '">' + pctPts(lv.dist_pct, 1) + ' · ' +
       Math.abs(lv.atr_dist).toFixed(1) + ' ATR</span></div>' +
       (inChart(lv, rg) ? '' : '<div class="gl-off">在图外：离现价太远</div>') +
-      '<ul class="why">' + lv.why.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' +
+      '<ul class="why"><li>' + plan.hold + '</li><li>' + plan.fail + '</li></ul>' +
       '<div class="gl-p two"><div><span>' + km.reach_days + ' 日内碰到 <b>' + pct(lv.reach) + '</b></span>' + probBar(lv.reach, c === 'res' ? 'r' : '') + '</div>' +
       '<div><span>碰到后' + verb + ' ' + km.win_atr + ' ATR <b>' + pct(lv.react) + '</b></span>' + probBar(lv.react, c === 'res' ? 'r' : '', 0.5) + '</div></div>' +
       '</div>';
