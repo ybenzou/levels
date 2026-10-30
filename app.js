@@ -338,21 +338,20 @@
         lineStyle: lv.kind === 'anchor' ? LightweightCharts.LineStyle.Dashed :
           (lv.priority <= 1 ? LightweightCharts.LineStyle.Solid : LightweightCharts.LineStyle.Dashed),
         axisLabelVisible: lv.priority <= 1 || lv.kind === 'anchor',
-        title: KIND_LABEL[lv.kind] + ' ' + lv.price,
       });
       linesArr.push(pl);
     });
     if (withVrvp && DATA.state && DATA.state.vrvp) {
       const v = DATA.state.vrvp;
       [
-        { price: v.poc, color: 'rgba(232,168,56,0.95)', w: 2, title: 'POC', style: LightweightCharts.LineStyle.Solid },
-        { price: v.vah, color: 'rgba(230,220,196,0.45)', w: 1, title: 'VAH', style: LightweightCharts.LineStyle.Dashed },
-        { price: v.val, color: 'rgba(230,220,196,0.45)', w: 1, title: 'VAL', style: LightweightCharts.LineStyle.Dashed },
+        { price: v.poc, color: 'rgba(232,168,56,0.95)', w: 2, style: LightweightCharts.LineStyle.Solid },
+        { price: v.vah, color: 'rgba(230,220,196,0.45)', w: 1, style: LightweightCharts.LineStyle.Dashed },
+        { price: v.val, color: 'rgba(230,220,196,0.45)', w: 1, style: LightweightCharts.LineStyle.Dashed },
       ].forEach(function (cfg) {
         if (cfg.price == null) return;
         linesArr.push(series.createPriceLine({
           price: cfg.price, color: cfg.color, lineWidth: cfg.w,
-          lineStyle: cfg.style, axisLabelVisible: true, title: cfg.title,
+          lineStyle: cfg.style, axisLabelVisible: true,
         }));
       });
     }
@@ -518,11 +517,33 @@
     candleSeries = chart.addCandlestickSeries(candleOpts());
     candleSeries.setData(candleData());
     applyPriceLines();
-    chart.timeScale().fitContent();
+    fitWithGutter(chart, nBars(), obsGutter());
     bindCrosshair(chart, candleSeries, '#crossBar');
     chart.timeScale().subscribeVisibleLogicalRangeChange(scheduleOverlay);
     chart.subscribeCrosshairMove(scheduleOverlay);
     bindResize(chart, el);
+  }
+
+  const TAPE_GUTTER = 24;
+
+  function nBars() {
+    return (DATA.ohlcv && DATA.ohlcv.length) || (DATA.price_series && DATA.price_series.length) || 0;
+  }
+
+  function obsGutter() {
+    const stack = $('#chart') && $('#chart').parentElement;
+    const w = stack ? stack.clientWidth : 0;
+    return filters.vrvp ? Math.min(96, Math.max(56, w * 0.14)) + 20 : TAPE_GUTTER;
+  }
+
+  // Show every bar but leave an empty strip on the right, so the newest candles
+  // never sit under the price-axis labels or the VRVP profile overlay.
+  function fitWithGutter(ch, n, gutterPx) {
+    if (!ch) return;
+    const ts = ch.timeScale();
+    const w = ts.width();
+    if (!n || !w || w <= gutterPx * 3) { ts.fitContent(); return; }
+    ts.setVisibleLogicalRange({ from: -0.5, to: n * w / (w - gutterPx) - 0.5 });
   }
 
   function ensureChartSized(key) {
@@ -535,7 +556,9 @@
     const h = stack ? stack.clientHeight : el.clientHeight;
     if (w > 0 && h > 0) {
       ch.applyOptions({ width: w, height: h });
-      ch.timeScale().fitContent();
+      if (key === 'signal') ch.timeScale().fitContent();
+      else if (key === 'playback') fitWithGutter(ch, playState.idx + 1, TAPE_GUTTER);
+      else fitWithGutter(ch, nBars(), key ? TAPE_GUTTER : obsGutter());
       if (!key) scheduleOverlay();
     } else {
       requestAnimationFrame(function () {
@@ -638,11 +661,11 @@
     series.setData(candleData());
     tapes.levels = { chart: ch, series: series, lines: [], inited: true };
     refreshLevelsChart();
-    ch.timeScale().fitContent();
+    fitWithGutter(ch, nBars(), TAPE_GUTTER);
     bindCrosshair(ch, series, '#crossLevels');
     bindResize(ch, el);
     const fit = $('#btnFitLevels');
-    if (fit) fit.onclick = function () { ch.timeScale().fitContent(); };
+    if (fit) fit.onclick = function () { fitWithGutter(ch, nBars(), TAPE_GUTTER); };
   }
 
   /* —— 触及 —— */
@@ -694,7 +717,6 @@
         lineWidth: 1,
         lineStyle: LightweightCharts.LineStyle.Dashed,
         axisLabelVisible: false,
-        title: e.family,
       }));
     });
 
@@ -744,11 +766,11 @@
     series.setData(candleData());
     tapes.hold = { chart: ch, series: series, lines: [], inited: true };
     refreshHoldMarkers();
-    ch.timeScale().fitContent();
+    fitWithGutter(ch, nBars(), TAPE_GUTTER);
     bindCrosshair(ch, series, '#crossHold');
     bindResize(ch, el);
     const fit = $('#btnFitHold');
-    if (fit) fit.onclick = function () { ch.timeScale().fitContent(); };
+    if (fit) fit.onclick = function () { fitWithGutter(ch, nBars(), TAPE_GUTTER); };
   }
 
   /* —— 突破 —— */
@@ -807,7 +829,6 @@
         lineWidth: 1,
         lineStyle: LightweightCharts.LineStyle.Dashed,
         axisLabelVisible: false,
-        title: e.family,
       }));
     });
 
@@ -900,11 +921,11 @@
     series.setData(candleData());
     tapes.break = { chart: ch, series: series, lines: [], inited: true };
     refreshBreakMarkers();
-    ch.timeScale().fitContent();
+    fitWithGutter(ch, nBars(), TAPE_GUTTER);
     bindCrosshair(ch, series, '#crossBreak');
     bindResize(ch, el);
     const fit = $('#btnFitBreak');
-    if (fit) fit.onclick = function () { ch.timeScale().fitContent(); };
+    if (fit) fit.onclick = function () { fitWithGutter(ch, nBars(), TAPE_GUTTER); };
   }
 
 
@@ -1161,7 +1182,6 @@
         lineWidth: 1,
         lineStyle: LightweightCharts.LineStyle.Dashed,
         axisLabelVisible: false,
-        title: e.family || '',
       }));
     });
 
@@ -1187,7 +1207,7 @@
     renderPlayRail(dateStr);
 
     if (fromUser && t.chart) {
-      t.chart.timeScale().fitContent();
+      fitWithGutter(t.chart, idx + 1, TAPE_GUTTER);
     }
   }
 
@@ -1283,7 +1303,7 @@
     bindCrosshair(ch, series, '#crossPlay');
     bindResize(ch, el);
     const fit = $('#btnFitPlay');
-    if (fit) fit.onclick = function () { ch.timeScale().fitContent(); };
+    if (fit) fit.onclick = function () { fitWithGutter(ch, playState.idx + 1, TAPE_GUTTER); };
     // start near beginning so playback story is clear (first ~20 days visible path)
     const startIdx = Math.min(19, Math.max(0, playState.fullCandles.length - 1));
     setPlayIndex(startIdx, true);
@@ -1667,13 +1687,14 @@
         filters.vrvp = !filters.vrvp;
         syncPresetButtons();
         applyPriceLines();
+        if (chart) fitWithGutter(chart, nBars(), obsGutter());
         scheduleOverlay();
       });
     }
     const fit = $('#btnFit');
     if (fit) {
       fit.addEventListener('click', function () {
-        if (chart) chart.timeScale().fitContent();
+        if (chart) fitWithGutter(chart, nBars(), obsGutter());
         scheduleOverlay();
       });
     }
