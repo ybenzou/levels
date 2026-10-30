@@ -181,38 +181,44 @@
   function chartTheme() {
     return {
       layout: {
-        background: { type: 'solid', color: '#12140e' },
-        textColor: '#9a9078',
+        background: { type: 'solid', color: '#050705' },
+        textColor: '#7a8a62',
         fontSize: 11,
         fontFamily: '"IBM Plex Mono", "SF Mono", Menlo, Consolas, monospace',
       },
       grid: {
-        vertLines: { color: '#2a2e22' },
-        horzLines: { color: '#2a2e22' },
+        vertLines: { color: 'rgba(90, 130, 55, 0.12)' },
+        horzLines: { color: 'rgba(90, 130, 55, 0.12)' },
       },
-      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-      rightPriceScale: { borderColor: '#4e5240', scaleMargins: { top: 0.04, bottom: 0.08 } },
-      timeScale: { borderColor: '#4e5240', timeVisible: false, rightOffset: 4 },
+      crosshair: {
+        mode: LightweightCharts.CrosshairMode.Normal,
+        vertLine: { color: 'rgba(255, 184, 58, 0.35)', width: 1, style: 2, labelBackgroundColor: '#1a1d14' },
+        horzLine: { color: 'rgba(159, 212, 95, 0.35)', width: 1, style: 2, labelBackgroundColor: '#1a1d14' },
+      },
+      rightPriceScale: { borderColor: '#24301a', scaleMargins: { top: 0.04, bottom: 0.08 } },
+      timeScale: { borderColor: '#24301a', timeVisible: false, rightOffset: 4 },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
       handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
     };
   }
 
   function candleOpts() {
+    /* CRT phosphor glow tubes: green up / amber down */
     return {
-      upColor: '#8fbc5a',
-      downColor: '#d4783a',
-      borderUpColor: '#8fbc5a',
-      borderDownColor: '#d4783a',
-      wickUpColor: '#8fbc5a',
-      wickDownColor: '#d4783a',
+      upColor: 'rgba(110, 255, 90, 0.42)',
+      downColor: 'rgba(255, 170, 40, 0.42)',
+      borderUpColor: '#9fff5c',
+      borderDownColor: '#ffb83a',
+      wickUpColor: '#c8ff90',
+      wickDownColor: '#ffd078',
+      borderVisible: true,
     };
   }
 
   function lineColor(kind, priority) {
-    if (kind === 'resistance') return priority <= 1 ? 'rgba(212,120,58,0.95)' : 'rgba(212,120,58,0.45)';
-    if (kind === 'support') return priority <= 1 ? 'rgba(143,188,90,0.95)' : 'rgba(143,188,90,0.4)';
-    return 'rgba(232,168,56,0.85)';
+    if (kind === 'resistance') return priority <= 1 ? 'rgba(255,184,58,0.95)' : 'rgba(255,184,58,0.42)';
+    if (kind === 'support') return priority <= 1 ? 'rgba(159,212,95,0.95)' : 'rgba(159,212,95,0.4)';
+    return 'rgba(255,208,120,0.9)';
   }
 
   function bindCrosshair(ch, series, elId) {
@@ -616,7 +622,7 @@
       return {
         time: toUnix(dt),
         position: isSup ? 'belowBar' : 'aboveBar',
-        color: held ? '#8fbc5a' : '#d4783a',
+        color: held ? '#9fff5c' : '#ffb83a',
         shape: held ? 'circle' : 'square',
         text: (isSup ? '撑' : '压') + (held ? '✓' : '✗'),
       };
@@ -729,7 +735,7 @@
       markers.push({
         time: toUnix(e.date),
         position: up ? 'aboveBar' : 'belowBar',
-        color: up ? '#e8a838' : '#d4783a',
+        color: up ? '#ffd078' : '#ffb83a',
         shape: up ? 'arrowUp' : 'arrowDown',
         text: (up ? '↑' : '↓') + (r5 != null ? pctPts(r5, 1) : ''),
       });
@@ -982,7 +988,7 @@
         byTime[toUnix(dt) + '|h'] = {
           time: toUnix(dt),
           position: isSup ? 'belowBar' : 'aboveBar',
-          color: held ? '#8fbc5a' : '#d4783a',
+          color: held ? '#9fff5c' : '#ffb83a',
           shape: held ? 'circle' : 'square',
           text: (isSup ? '撑' : '压') + (held ? '✓' : '✗'),
         };
@@ -1001,7 +1007,7 @@
         byTime[toUnix(e.date) + '|b'] = {
           time: toUnix(e.date),
           position: up ? 'aboveBar' : 'belowBar',
-          color: up ? '#e8a838' : '#d4783a',
+          color: up ? '#ffd078' : '#ffb83a',
           shape: up ? 'arrowUp' : 'arrowDown',
           text: up ? '↑' : '↓',
         };
