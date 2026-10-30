@@ -1,4 +1,4 @@
-/* AVGO levels — cassette tape · K-line on every tab */
+/* Levels — cassette tape · multi-ticker ready (AVGO first) · K-line on every tab */
 (function () {
   'use strict';
 
@@ -287,10 +287,17 @@
   }
 
   function renderHeader() {
-    $('#title').textContent = DATA.symbol;
+    const sym = DATA.symbol || 'AVGO';
+    $('#title').textContent = sym;
+    document.title = 'Levels · ' + sym;
     const close = Number(DATA.last_close).toFixed(2);
     $('#asof').innerHTML = '截至 <strong>' + esc(DATA.as_of) + '</strong> · 末收 <strong>' +
       close + '</strong>';
+    document.querySelectorAll('#tickerSwitch .tick').forEach(function (btn) {
+      const on = btn.getAttribute('data-symbol') === sym;
+      btn.classList.toggle('on', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
   }
 
   /* —— Observe VRVP overlay (unchanged logic) —— */
