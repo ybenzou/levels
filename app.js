@@ -183,7 +183,7 @@
       layout: {
         background: { type: 'solid', color: '#010302' },
         textColor: '#7a8a62',
-        fontSize: 11,
+        fontSize: 15,
         fontFamily: '"IBM Plex Mono", "SF Mono", Menlo, Consolas, monospace',
       },
       grid: {
@@ -505,7 +505,7 @@
       .sort(function (a, b) { return (b.hit_rate || 0) - (a.hit_rate || 0); })
       .slice(0, 6);
     if (!ranked.length) {
-      $('#obsTopFamilies').innerHTML = '<div class="muted" style="padding:4px 12px;font-size:11px">—</div>';
+      $('#obsTopFamilies').innerHTML = '<div class="muted" style="padding:4px 12px;font-size:15px">—</div>';
     } else {
       $('#obsTopFamilies').innerHTML = ranked.map(function (f) {
         const isR = f.side === 'resistance';
